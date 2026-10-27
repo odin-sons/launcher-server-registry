@@ -21,3 +21,19 @@ is a step for a person with admin rights. Items are grouped by the pull request 
 on the `/servers/` line with a reviewer team to let more people approve listings while signing-related
 paths (`/.github/`, `/tools/`, `/config/`, `/keys/`, `/data/`, `/schema/`) stay with the owners. A
 team must have write access to the repository for its code-owner review to count.
+
+## Validation workflow
+
+`.github/workflows/validate.yml` needs no secret and no setting beyond the defaults.
+
+- [ ] Add the `validate` check to the required checks of `main`. The workflow runs on every pull
+      request (so the check always reports) and only comments on pull requests that touch `servers/`.
+- [ ] Settings, Actions, General, "Fork pull request workflows": leave the defaults. The workflow uses
+      `pull_request_target`, so it runs the code of `main`, never the code of the pull request, and
+      reads the entry files through the API as plain data. The only token it holds is the job's own,
+      read-only for the downloading job and `pull-requests: write` for the job that posts the comment.
+- [ ] Keep `tools/ci/` and `tools/lib/` under code-owner review: a change there is a change to what
+      runs with write access on pull requests.
+
+The comment is edited in place and identified by `<!-- registry-validation -->`. Only a comment from
+`github-actions[bot]` that starts with that marker is ever edited.
