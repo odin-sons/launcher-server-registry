@@ -57,3 +57,21 @@ The scan job holds the key in the environment of one step. That step also downlo
 community's mirrors (only the ones VirusTotal does not know, to upload them), through the same hardened
 downloader as validation; the key is only ever sent to `www.virustotal.com`. Files over 32 MiB are not
 uploaded: the comment lists them for a manual look.
+
+## Scheduled re-scan
+
+`.github/workflows/rescan.yml` runs daily (04:23 UTC) and on demand. For every `approved` entry it
+downloads each pinned file from every mirror and compares the hash, and (with `VIRUSTOTAL_API_KEY`) looks
+the entry's code files up again, asking VirusTotal for a fresh analysis when its report is older than 7
+days. A pinned file whose hash changed or disappeared, or a file now flagged by at least the threshold
+and not on the benign list, opens a pull request that sets the entry to `needs-approval`. A mirror
+that cannot be reached is only noted: an outage does not demote a community.
+
+- [ ] Settings, Actions, General, Workflow permissions: tick "Allow GitHub Actions to create and approve
+      pull requests". Without it the workflow opens an issue with the same text instead.
+- [ ] Do not make the re-scan pull requests merge themselves: merging one is a maintainer's decision,
+      and the merge is what removes the community from new installs in the next index.
+- [ ] GitHub switches scheduled workflows off after 60 days without repository activity. The re-scan and
+      the re-signing both depend on the schedule, so watch the Actions tab or use a monthly commit.
+- Re-scan commits are made through the API and are signed by GitHub; this is the one place where the
+  registry's own history carries GitHub-signed commits.
