@@ -1,0 +1,4 @@
+MANIFEST 3 sha256
+57d936ffc743e57ca6b6df31205d0f587360d1236a2a16127c7c32f5ea1b70e5 17 BepInEx/plugins/Demo/Demo.dll
+c1634dd7e82efb68742b4cfddc86ab22600c3aa508739a2f6c120cf3c1a22fcb 40 BepInEx/plugins/Demo/manifest.json
+af5a3efcfeea3add5d760f4bf96ced345b02f0471703dd52f8d3a067724a6d5c 25 BepInEx/config/demo.cfg

@@ -33,6 +33,8 @@ servers/<id>.json  --pull request-->  CI checks + maintainer review  --merge--> 
 |------|---------|
 | `servers/` | One entry per community |
 | `schema/server.schema.json` | JSON Schema for an entry |
+| `tools/` | Validation, hashing and the CI scripts (Node.js, no dependencies) |
+| `test/` | Tests (`node --test`) and the fixture community they run against |
 | `docs/` | Maintainer documentation |
 | `.github/` | Code owners, pull request template, workflows |
 

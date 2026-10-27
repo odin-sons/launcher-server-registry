@@ -1,0 +1,1 @@
+{"themeSchema":1,"layout":"classic","online":"left","font":"montserrat","logo":{"file":"theme/logo.png"},"button":{"radius":6,"borderWidth":2},"schemes":{"dark":{"accent":"#C8A24A","buttonFill":{"type":"solid","color":"#8F6B1F"},"art":{"type":"image","file":"theme/art.png","position":"right"}},"light":{"accent":"#8F6B1F","art":{"type":"solid","color":"#E6C477"}}}}

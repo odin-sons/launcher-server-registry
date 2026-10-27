@@ -47,7 +47,8 @@ images. The mods themselves are pinned by the SHA-256 values inside the manifest
 manifest means changing its digest.
 
 Compute a digest with `sha256sum <file>` (Linux), `shasum -a 256 <file>` (macOS) or
-`Get-FileHash -Algorithm SHA256 <file>` (PowerShell, lowercase the result).
+`Get-FileHash -Algorithm SHA256 <file>` (PowerShell, lowercase the result). With Node.js 20 or newer,
+`node tools/digest.js <site-root> servers.json Profile/update.info` prints the whole `digests` object.
 
 ```json
 {
@@ -70,10 +71,12 @@ to change it.
 
 1. Fork this repository and add `servers/<id>.json`. Touch nothing else: a pull request that changes
    files outside `servers/` is flagged and needs a maintainer's attention.
-2. Open a pull request and fill in the template.
-3. CI downloads your files and posts one comment with the result. It is updated in place whenever you
+2. Run `node tools/validate.js servers/<id>.json` in your fork. It downloads your files and checks them
+   the way CI does, so you see the result before anyone else does.
+3. Open a pull request and fill in the template.
+4. CI downloads your files and posts one comment with the result. It is updated in place whenever you
    push. Fix everything marked as an error.
-4. A maintainer reviews the change (below). Merging adds your community to the next signed index.
+5. A maintainer reviews the change (below). Merging adds your community to the next signed index.
 
 ## What CI checks
 
