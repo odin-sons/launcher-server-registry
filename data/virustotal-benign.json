@@ -1,0 +1,112 @@
+{
+  "benign": [
+    {
+      "sha256": "1a21cc03424fc82c3dd1346905d16494536b9595ae4162228d99fb7c285c1031",
+      "note": "BepInEx_linux_x64_5.4.23.6: BepInEx/core/0Harmony.dll"
+    },
+    {
+      "sha256": "ee65b412b40ead89b1f27f8165e914af6783f5db49d2ef7ca0e6de4aca8f283f",
+      "note": "BepInEx_linux_x64_5.4.23.6: BepInEx/core/0Harmony20.dll"
+    },
+    {
+      "sha256": "b937e529616bb27a0fa05162a710fea79c82da126e15fec34811040c0416c4fe",
+      "note": "BepInEx_linux_x64_5.4.23.6: BepInEx/core/BepInEx.Harmony.dll"
+    },
+    {
+      "sha256": "80abc22c8d77622f1af422686749f572a8ee6606b922b8346fe110c0f628817c",
+      "note": "BepInEx_linux_x64_5.4.23.6: BepInEx/core/BepInEx.Preloader.dll"
+    },
+    {
+      "sha256": "780f175821781c14fdc349bf214603b7bab594ac556aecb1f6679b80248133f0",
+      "note": "BepInEx_linux_x64_5.4.23.6: BepInEx/core/BepInEx.dll"
+    },
+    {
+      "sha256": "eafc025f3acf7ecd9fdc18c2309885f3feb452415d75a4f0fa058d993049b688",
+      "note": "BepInEx_linux_x64_5.4.23.6: BepInEx/core/HarmonyXInterop.dll"
+    },
+    {
+      "sha256": "5896d1898f616701fff18f3b2c71e6b844d2390ef9f41e1c5fccce8cb27c698e",
+      "note": "BepInEx_linux_x64_5.4.23.6: BepInEx/core/Mono.Cecil.Mdb.dll"
+    },
+    {
+      "sha256": "174db44a067f58561510af746f3caeb032037762c57a31c8d9ee32db25174984",
+      "note": "BepInEx_linux_x64_5.4.23.6: BepInEx/core/Mono.Cecil.Pdb.dll"
+    },
+    {
+      "sha256": "54ac539fb5ddc8b44c0e9acd0fcb7324f89d1a072edf8ebc1b06dd691e3d3927",
+      "note": "BepInEx_linux_x64_5.4.23.6: BepInEx/core/Mono.Cecil.Rocks.dll"
+    },
+    {
+      "sha256": "7ae470288fff4a402899c254d0a76cefef55877f5c54f96e83c797cc5bb6e2f6",
+      "note": "BepInEx_linux_x64_5.4.23.6: BepInEx/core/Mono.Cecil.dll"
+    },
+    {
+      "sha256": "40e49bb314391cd7bddc2644f8553eeba92c194b940836b103df16955c464e0c",
+      "note": "BepInEx_linux_x64_5.4.23.6: BepInEx/core/MonoMod.RuntimeDetour.dll"
+    },
+    {
+      "sha256": "9d1495f147ac93c4f81f84538c1a326e8f8a6aefc78d6289d798f3ce1162c5e9",
+      "note": "BepInEx_linux_x64_5.4.23.6: BepInEx/core/MonoMod.Utils.dll"
+    },
+    {
+      "sha256": "42287f4b8a3a3607f5e7f026657d022da69bc678385986bace3d7c4979321edf",
+      "note": "BepInEx_linux_x64_5.4.23.6: libdoorstop.so"
+    },
+    {
+      "sha256": "fce0304a2a34bf0104f685a94ddd6f4236e98f360ae67498fd78a83217757a60",
+      "note": "BepInEx_linux_x64_5.4.23.6: run_bepinex.sh"
+    },
+    {
+      "sha256": "f1f69690ccc7aae9156238c4115c09e9c9c7bd646d4524ff9091ae3e04667e23",
+      "note": "BepInEx_unix_5.4.22.0: BepInEx/core/0Harmony20.dll"
+    },
+    {
+      "sha256": "d0739c4a13f369094cb164c205ee4cca5392bdd7241b9f242ee13f0d4c0b1856",
+      "note": "BepInEx_unix_5.4.22.0: BepInEx/core/BepInEx.Harmony.dll"
+    },
+    {
+      "sha256": "d247b6a3b9a04f0d96105cda2961864a404aedb9193c59663aac5fa153d6ffbd",
+      "note": "BepInEx_unix_5.4.22.0: BepInEx/core/BepInEx.Preloader.dll"
+    },
+    {
+      "sha256": "2674d3aecf3097bee817abe7e8bbcc42bf583df51402069d5fcd4fbed55017ce",
+      "note": "BepInEx_unix_5.4.22.0: BepInEx/core/BepInEx.dll"
+    },
+    {
+      "sha256": "8c26c96003c32742b8fa3d134f56782530be3a8ee8b8c662bde210190d1aac64",
+      "note": "BepInEx_unix_5.4.22.0: BepInEx/core/HarmonyXInterop.dll"
+    },
+    {
+      "sha256": "1867bfefe236bcf2c29d2a7e183a755c749861d27355e8bc4317a343e93ef15b",
+      "note": "BepInEx_unix_5.4.22.0: doorstop_libs/libdoorstop_x64.dylib"
+    },
+    {
+      "sha256": "7183f453cf263c31a7a73312ff1122cbbb120217cba699f46f9397887cdf55f4",
+      "note": "BepInEx_unix_5.4.22.0: doorstop_libs/libdoorstop_x64.so"
+    },
+    {
+      "sha256": "7f0d1b00a8eb71f0746e9d2ecf3a18034662e0e5826ac7357ceb8d117ed14eff",
+      "note": "BepInEx_unix_5.4.22.0: doorstop_libs/libdoorstop_x86.dylib"
+    },
+    {
+      "sha256": "fb7b75792109d5694e0a7faa8516c247a9550558990775bdd2ea613cb0bbec46",
+      "note": "BepInEx_unix_5.4.22.0: doorstop_libs/libdoorstop_x86.so"
+    },
+    {
+      "sha256": "58eaf7208605fcf6130a2924a26b0c24eae28a011fc0996a16c475807fdf9b4e",
+      "note": "BepInEx_unix_5.4.22.0: run_bepinex.sh"
+    },
+    {
+      "sha256": "0f39399eba05dea9419781187ae2a6b0555afcdf1859f1319b6213be7729013b",
+      "note": "BepInEx_win_x64_5.4.23.6: winhttp.dll"
+    },
+    {
+      "sha256": "cf9dd372ca0ddbe01153502c49f8f756197bb260001792fe766f6c0242dc7fc0",
+      "note": "BepInEx_x64_5.4.22.0: winhttp.dll"
+    },
+    {
+      "sha256": "0d94f31d67437b393b491572204fc3dd952fce92559625afe85a1e5294544b22",
+      "note": "BepInEx_x86_5.4.22.0: winhttp.dll"
+    }
+  ]
+}
