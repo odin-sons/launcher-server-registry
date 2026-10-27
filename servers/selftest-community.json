@@ -12,10 +12,9 @@
     "Profile/optional.info": "2ff51d2138fe5d3d286ce8b55b1d0b0033c061e2e53a00217da18592bc86f7c2",
     "Profile/update.info": "bd6828accb0d3178b80c1adc929e0c956b67622f127171fb33dc52f08be5e8bd",
     "about.json": "5b7f08d28dd053b0600cbedb61efce1b631c67bca6f50cb846d52c8127c18c59",
-    "servers.json": "e0a194f97695474b3ec325a63e62467552d6fa5ae2300bd5c09e115115aee325",
+    "servers.json": "0000000000000000000000000000000000000000000000000000000000000000",
     "terms/en.md": "9dda3bf45342843562982d02b281b83f3de92c7c0743ede4abd29c6decb1d850",
     "theme/art.png": "e999fa18508b07f5cf15cf59d61361c117a644d5270b604e87763735f3cbee76",
-    "theme/logo.png": "b802541b8fc7facfcf217e07f38c80a82e77406f0c8d017ac91bcba0c8ec70c2",
     "theme/theme.json": "615e6ecdf46ce43b1f85b07a081793fc42740d52da66e81f783f872b498d6c86"
   },
   "theme": "theme/theme.json",
