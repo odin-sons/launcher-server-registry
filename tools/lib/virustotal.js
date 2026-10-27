@@ -54,6 +54,10 @@ function createClient({ apiKey, baseUrl = API, fetchImpl = fetch }) {
       const body = await call('POST', '/files', form);
       return body.data.id;
     },
+    async reanalyse(sha256) {
+      const body = await call('POST', `/files/${sha256}/analyse`);
+      return body.data.id;
+    },
     async analysis(id) {
       const body = await call('GET', `/analyses/${encodeURIComponent(id)}`);
       if (!body || body.data.attributes.status !== 'completed') return null;
@@ -76,11 +80,11 @@ const detections = (result) => result.malicious + result.suspicious;
  * those uploads while the budget lasts. Whatever does not fit is reported as queued, never guessed.
  * `cache` is a plain object { results: {sha256: {...}}, ledger: [ms] } that the caller persists.
  */
-async function scan(targets, { client, budget, cache, benign, threshold, deadline, maxUploadBytes, download, log = () => {} }) {
+async function scan(targets, { client, budget, cache, benign, threshold, deadline, maxUploadBytes, download, cacheMaxAgeMs = 7 * DAY, reanalyseAfterMs = null, log = () => {} }) {
   const out = [];
   const pending = [];
   const uploads = [];
-  const fresh = (entry) => entry && Date.now() - entry.at < 7 * DAY;
+  const fresh = (entry) => entry && Date.now() - entry.at < cacheMaxAgeMs;
 
   for (const target of targets) {
     const base = { sha256: target.sha256, size: target.size, paths: target.paths };
@@ -103,6 +107,16 @@ async function scan(targets, { client, budget, cache, benign, threshold, deadlin
     } catch (error) {
       out.push({ ...base, status: error instanceof QuotaError ? 'queued' : 'error', note: error.message });
       continue;
+    }
+    if (found && found.total > 0 && reanalyseAfterMs !== null && found.date && Date.now() - found.date * 1000 > reanalyseAfterMs) {
+      try {
+        if (await budget.take(deadline)) {
+          pending.push({ base, id: await client.reanalyse(target.sha256), fallback: found });
+          continue;
+        }
+      } catch {
+        // keep the report that is already there
+      }
     }
     if (found && found.total === 0) {
       out.push({ ...base, status: 'analysis-pending', note: 'VirusTotal has no engine results for this file yet' });
@@ -139,14 +153,14 @@ async function scan(targets, { client, budget, cache, benign, threshold, deadlin
   while (pending.length) {
     const entry = pending.shift();
     if (!(await budget.take(deadline))) {
-      out.push({ ...entry.base, status: 'analysis-pending' });
+      out.push(pendingResult(entry, threshold));
       continue;
     }
     let result = null;
     try {
       result = await client.analysis(entry.id);
     } catch (error) {
-      out.push({ ...entry.base, status: error instanceof QuotaError ? 'analysis-pending' : 'error', note: error.message });
+      out.push(error instanceof QuotaError ? pendingResult(entry, threshold) : { ...entry.base, status: 'error', note: error.message });
       continue;
     }
     if (result && result.total > 0) {
@@ -157,11 +171,16 @@ async function scan(targets, { client, budget, cache, benign, threshold, deadlin
       await budget.sleep(wait);
       wait = Math.min(wait * 2, 120000);
     } else {
-      out.push({ ...entry.base, status: 'analysis-pending' });
+      out.push(pendingResult(entry, threshold));
     }
   }
   log(`${out.length} files processed`);
   return out.sort((a, b) => (a.sha256 < b.sha256 ? -1 : 1));
+}
+
+function pendingResult(entry, threshold) {
+  if (!entry.fallback) return { ...entry.base, status: 'analysis-pending' };
+  return { ...entry.base, ...entry.fallback, status: classify(entry.fallback, threshold), note: 'newer analysis pending' };
 }
 
 function classify(result, threshold) {
