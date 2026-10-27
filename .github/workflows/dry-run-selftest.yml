@@ -1,0 +1,30 @@
+name: dry-run-selftest
+
+# Builds and signs the index with a key made in the job and thrown away with it, then verifies the result with
+# the verifier that mirrors the launcher's reader. Publishes nothing and needs no secret or environment.
+on:
+  pull_request:
+
+permissions: {}
+
+jobs:
+  dry-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Sign with a throwaway key
+        run: node tools/sign-index.js --throwaway --out dist/site
+
+      - name: Verify the signed index
+        run: node tools/verify-index.js dist/site/index.json --public-key dist/site/throwaway.pub.pem
+
+      - name: Show what would be published
+        run: |
+          ls -l dist/site
+          node -e "const e=JSON.parse(require('fs').readFileSync('dist/site/index.json','utf8'));const p=JSON.parse(Buffer.from(e.payload,'base64'));console.log(JSON.stringify({keyId:e.keyId,serial:p.serial,issuedAt:p.issuedAt,expiresAt:p.expiresAt,minLauncher:p.minLauncher,servers:p.servers.map((s)=>s.id+':'+s.status)},null,2))"
