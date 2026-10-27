@@ -1,0 +1,10 @@
+{
+  "name": "launcher-server-registry",
+  "private": true,
+  "description": "Official server registry for the OdinSons Valheim launcher: reviewed community servers and the signed index.",
+  "license": "MIT",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "node --test"
+  }
+}
