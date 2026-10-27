@@ -1,0 +1,145 @@
+name: publish
+
+# Builds index.json from servers/, signs it and publishes it to every host in config/mirrors.json.
+# Never runs on a pull request. Only the `sign` job can see the key, and only through the `registry` environment.
+on:
+  push:
+    branches: [main]
+    paths:
+      - servers/**
+      - config/index.json
+      - config/mirrors.json
+  schedule:
+    - cron: '41 5 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    outputs:
+      enabled: ${{ steps.check.outputs.enabled }}
+    steps:
+      - id: check
+        env:
+          PUBLISH: ${{ vars.REGISTRY_PUBLISH }}
+          ON_DEFAULT_BRANCH: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+        run: |
+          if [ "$PUBLISH" = "true" ] && [ "$ON_DEFAULT_BRANCH" = "true" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Publishing is off: set the repository variable REGISTRY_PUBLISH to true when the registry environment and the key are ready (and run from the default branch)."
+          fi
+
+  sign:
+    needs: gate
+    if: needs.gate.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: registry
+    permissions:
+      contents: read
+    outputs:
+      serial: ${{ steps.sign.outputs.serial }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build and sign the index
+        id: sign
+        env:
+          REGISTRY_SIGNING_KEY: ${{ secrets.REGISTRY_SIGNING_KEY }}
+          REGISTRY_KEY_ID: ${{ vars.REGISTRY_KEY_ID || 'r1' }}
+        run: node tools/sign-index.js --key-id "$REGISTRY_KEY_ID" --public-key "keys/$REGISTRY_KEY_ID.pub.pem" --out dist/site
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: site
+          path: dist/site
+          include-hidden-files: true
+          retention-days: 7
+
+  deploy-pages:
+    needs: sign
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: site
+          path: site
+
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+
+  deploy-cloudflare:
+    needs: sign
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      deployed: ${{ steps.deploy.outputs.deployed }}
+    env:
+      CONFIGURED: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: site
+          path: site
+
+      - id: deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ "$CONFIGURED" != "true" ]; then
+            echo "deployed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Cloudflare Pages is not configured (CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID); skipping it."
+            exit 0
+          fi
+          PROJECT=$(node -p "require('./config/mirrors.json').mirrors.find((m) => m.kind === 'cloudflare-pages').project")
+          npx --yes wrangler@4.148.0 pages deploy site --project-name "$PROJECT" --branch main --commit-dirty=true
+          echo "deployed=true" >> "$GITHUB_OUTPUT"
+
+  verify:
+    needs: [sign, deploy-pages, deploy-cloudflare]
+    if: always() && needs.sign.result == 'success' && needs.deploy-pages.result == 'success' && needs.deploy-cloudflare.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check that every published host serves the new index
+        env:
+          SERIAL: ${{ needs.sign.outputs.serial }}
+          REGISTRY_KEY_ID: ${{ vars.REGISTRY_KEY_ID || 'r1' }}
+          REQUIRED: ${{ needs.deploy-cloudflare.outputs.deployed == 'true' && 'github-pages,cloudflare-pages' || 'github-pages' }}
+        run: node tools/verify-mirrors.js --public-key "keys/$REGISTRY_KEY_ID.pub.pem" --key-id "$REGISTRY_KEY_ID" --serial "$SERIAL" --require "$REQUIRED"

@@ -75,3 +75,54 @@ that cannot be reached is only noted: an outage does not demote a community.
       the re-signing both depend on the schedule, so watch the Actions tab or use a monthly commit.
 - Re-scan commits are made through the API and are signed by GitHub; this is the one place where the
   registry's own history carries GitHub-signed commits.
+
+## Signing and publishing
+
+`.github/workflows/publish.yml` signs and publishes; `registry-dry-run` rehearses it. Nothing
+publishes until the repository variable `REGISTRY_PUBLISH` is `true`, so merging the workflow is safe.
+Key handling is in [key-management.md](key-management.md).
+
+- [ ] Environment `registry` (Settings, Environments): deployment branches limited to `main`; add
+      required reviewers only if you do not want the scheduled re-signing to run unattended (it is
+      designed to). Secret `REGISTRY_SIGNING_KEY`: the PEM private key (PKCS#8 from
+      `openssl genpkey`). Optional variable `REGISTRY_KEY_ID` (default `r1`).
+- [ ] Commit the public key as `keys/r1.pub.pem`.
+- [ ] Put the key in the launcher: `node tools/key-info.js keys/r1.pub.pem r1` prints the line for
+      `RegistryKeySet.Official` (`Launcher.Core/RegistryKeySet.cs`). Ship a launcher with it before
+      players rely on the registry.
+- [ ] GitHub Pages (Settings, Pages): source "GitHub Actions". The deployment uses the built-in
+      `github-pages` environment.
+- [ ] Cloudflare Pages: create a Direct Upload project with the name in `config/mirrors.json`
+      (`odinsons-registry` by default, which gives `https://odinsons-registry.pages.dev/`), production
+      branch `main`. Add the repository secrets `CLOUDFLARE_API_TOKEN` (a token with "Cloudflare Pages: Edit"
+      for that account only) and `CLOUDFLARE_ACCOUNT_ID`. Without them the Cloudflare job skips itself with a
+      notice and publishing continues to the other hosts. The deploy job runs a pinned `wrangler`
+      (4.148.0 through `npx`); it is the one third-party package in the pipeline and runs in a job that
+      never sees the signing key.
+- [ ] Decide the public names: the defaults in `config/mirrors.json` are the GitHub Pages address
+      of this repository and the `pages.dev` project above. Custom domains are better (a domain you can
+      move to another host), and each mirror you change here must be changed in the launcher too.
+- [ ] Set the variable `REGISTRY_PUBLISH` to `true` and run the `publish` workflow once.
+- [ ] Run `registry-dry-run` first (Actions, Run workflow) to see the index that would be signed.
+- [ ] Watch the schedule: `publish` runs daily (05:41 UTC); the index is valid for 14 days.
+
+After a publish the `verify` job fetches `index.json` from every configured host and checks signature,
+expiry and serial against `keys/<id>.pub.pem`. A host that is configured but behind fails the run.
+
+### What the launcher has to list
+
+`OfficialRegistry.Mirrors` in `Launcher.Core/OfficialRegistry.cs` takes the base URLs of the hosts
+that serve `index.json`, the same as the `url` fields of `config/mirrors.json` (both end in `/`):
+
+```
+https://odin-sons.github.io/launcher-server-registry/
+https://odinsons-registry.pages.dev/
+```
+
+## Setup order
+
+1. Merge the pull requests in order (scaffold, validation, VirusTotal, re-scan, signing), locally and signed.
+2. Branch protection and the required checks `test` and `validate`.
+3. Secrets: `VIRUSTOTAL_API_KEY`. Settings: Actions may create pull requests.
+4. Key, environment `registry`, `keys/r1.pub.pem`, the launcher build that pins it.
+5. Pages and Cloudflare, then `REGISTRY_PUBLISH=true`.
