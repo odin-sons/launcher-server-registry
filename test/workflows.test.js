@@ -67,6 +67,16 @@ for (const { name, text } of workflows) {
     }
   });
 
+  test(`${name}: the signing key is only reachable from a job bound to the registry environment`, () => {
+    for (const job of jobBlocks(text)) {
+      const body = job.lines.join('\n');
+      if (!body.includes('secrets.REGISTRY_SIGNING_KEY')) continue;
+      assert.match(body, /^ {4}environment: registry$/m, `job ${job.id}`);
+      assert.ok(!body.includes('actions/cache@'), `job ${job.id} must not cache anything`);
+      assert.ok(!/path: (?!dist\/site$)/m.test(body.replace(/path: \.?\/?$/gm, '')) || !body.includes('upload-artifact'), `job ${job.id} uploads more than dist/site`);
+    }
+  });
+
   test(`${name}: pull_request_target never checks out pull request code`, () => {
     if (!/^ {2}pull_request_target:/m.test(triggers(text))) return;
     assert.doesNotMatch(text, /github\.head_ref/);

@@ -32,5 +32,4 @@ servers, and mods that are not listed here.
 ## Key compromise
 
 The registry key is a CI secret, never a file in this repository. A suspected leak is handled as a
-compromise: the key is replaced in the next launcher build, as described in the launcher's
-[registry-trust-policy.md](https://github.com/odin-sons/Launcher/blob/master/docs/registry-trust-policy.md).
+compromise: the key is replaced in the next launcher build, as described in [docs/key-management.md](docs/key-management.md).
