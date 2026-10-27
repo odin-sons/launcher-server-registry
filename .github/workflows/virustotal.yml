@@ -1,0 +1,104 @@
+name: virustotal
+
+# Same isolation as validate.yml: runs the code of the base branch and reads the pull request's entry files
+# through the API as plain data. The API key exists only in the environment of the one step that scans.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions: {}
+
+concurrency:
+  group: virustotal-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      relevant: ${{ steps.fetch.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Read the entries of the pull request as data
+        id: fetch
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_AUTHOR_ASSOCIATION: ${{ github.event.pull_request.author_association }}
+        run: node tools/ci/fetch-pr-entries.js .tmp/pr
+
+      - name: Restore the lookup cache
+        if: steps.fetch.outputs.relevant == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache
+          key: virustotal-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: virustotal-
+
+      - name: Scan with VirusTotal
+        if: steps.fetch.outputs.relevant == 'true'
+        env:
+          VIRUSTOTAL_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
+        run: >
+          node tools/virustotal.js
+          --entries-dir .tmp/pr/servers
+          --meta .tmp/pr/meta.json
+          --cache .cache/virustotal.json
+          --out .tmp/virustotal.json
+          --markdown .tmp/virustotal.md
+
+      - name: Show the result in the job summary
+        if: always() && steps.fetch.outputs.relevant == 'true'
+        run: |
+          if [ -f .tmp/virustotal.md ]; then cat .tmp/virustotal.md >> "$GITHUB_STEP_SUMMARY"; fi
+
+      - name: Keep the result for the comment job
+        if: always() && steps.fetch.outputs.relevant == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: virustotal
+          path: .tmp/virustotal.md
+          if-no-files-found: ignore
+          retention-days: 3
+
+  comment:
+    needs: scan
+    if: always() && needs.scan.outputs.relevant == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Get the rendered comment
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        continue-on-error: true
+        with:
+          name: virustotal
+          path: .tmp
+
+      - name: Post or update the comment
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          mkdir -p .tmp
+          if [ ! -s .tmp/virustotal.md ]; then
+            printf '<!-- registry-virustotal -->\n## VirusTotal: did not finish\n\nThe scan stopped before it produced a result. See the [workflow run](%s).\n' "$RUN_URL" > .tmp/virustotal.md
+          fi
+          node tools/ci/post-comment.js .tmp/virustotal.md '<!-- registry-virustotal -->'

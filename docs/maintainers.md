@@ -37,3 +37,23 @@ team must have write access to the repository for its code-owner review to count
 
 The comment is edited in place and identified by `<!-- registry-validation -->`. Only a comment from
 `github-actions[bot]` that starts with that marker is ever edited.
+
+## VirusTotal
+
+- [ ] Create a VirusTotal account for the registry and add its API key as the repository secret
+      `VIRUSTOTAL_API_KEY` (Settings, Secrets and variables, Actions). Until it exists the workflow posts
+      "not run" and nothing is sent anywhere. The free tier allows 4 requests a minute and 500 a day; the
+      key must not be shared with other tools, since the daily count is kept per key.
+- [ ] Decide the threshold in `config/virustotal.json` (default 5: files that this many engines call
+      malicious or suspicious are listed first). It only changes the label in the comment; a detection
+      never fails a check. `reservedForRescan` (default 150) keeps part of the day for the scheduled
+      re-scan.
+- [ ] Review `data/virustotal-benign.json` in pull requests. It lists the SHA-256 of the BepInEx and
+      Doorstop files of official releases, which are skipped (they would otherwise use up the quota and
+      look suspicious). `node tools/benign.js --note <release> <root> <files>` adds more. Add a file only
+      after checking where it came from.
+
+The scan job holds the key in the environment of one step. That step also downloads files from the
+community's mirrors (only the ones VirusTotal does not know, to upload them), through the same hardened
+downloader as validation; the key is only ever sent to `www.virustotal.com`. Files over 32 MiB are not
+uploaded: the comment lists them for a manual look.
