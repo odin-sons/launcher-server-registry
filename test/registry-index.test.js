@@ -244,3 +244,71 @@ test('the committed configuration is consistent with the format', () => {
   assert.equal(new Set(mirrors.map((m) => m.name)).size, mirrors.length);
   for (const mirror of mirrors) assert.match(mirror.url, /^https:\/\/[^/@?#]+\/(?:[^?#]*\/)?$/);
 });
+
+test('theme, about and terms are read the way the launcher reads them', () => {
+  const digests = { 'servers.json': 'ab'.repeat(32), 'theme/theme.json': 'cd'.repeat(32), 'about.json': 'cd'.repeat(32), 'terms/en.md': 'cd'.repeat(32), 'terms/de.md': 'cd'.repeat(32) };
+  const full = entry('ab-cd', { digests, theme: 'theme/theme.json', about: 'about.json', terms: { en: 'terms/en.md', 'pt-BR': 'terms/de.md' } });
+  const read = (patch) => failure(() => idx.readIndex(envelopeOf(idx.buildPayload([{ ...full, ...patch }], settings)), keys));
+  const server = idx.readIndex(envelopeOf(idx.buildPayload([full], settings)), keys).servers[0];
+  assert.equal(server.theme, 'theme/theme.json');
+  assert.equal(server.about, 'about.json');
+  assert.deepEqual(server.terms, { en: 'terms/en.md', 'pt-BR': 'terms/de.md' });
+  assert.equal(read({}), null);
+  assert.equal(read({ theme: 'theme/missing.json' }), 'Invalid', 'a theme that is not pinned');
+  assert.equal(read({ about: '../about.json' }), 'Invalid');
+  assert.equal(read({ about: 7 }), 'Invalid');
+  assert.equal(read({ terms: { en: 'terms/en.md', 'pt-BR-x': 'terms/de.md' } }), 'Invalid', 'more than one subtag');
+  assert.equal(read({ terms: { en: 'terms/en.md', EN: 'terms/de.md' } }), 'Invalid');
+  assert.equal(read({ terms: { de: 'terms/de.md' } }), 'Invalid', 'English is required');
+  assert.equal(read({ terms: { en: 'terms/unpinned.md' } }), 'Invalid');
+  assert.equal(read({ terms: 'terms/en.md' }), 'Invalid');
+  assert.equal(read({ terms: {} }), null, 'an empty terms object is fine');
+  const languages = (count) => Object.fromEntries(Array.from({ length: count }, (_, i) => [i === 0 ? 'en' : `a${String.fromCharCode(96 + i)}`, 'terms/en.md']));
+  assert.equal(read({ terms: languages(16) }), null);
+  assert.equal(read({ terms: languages(17) }), 'Invalid');
+});
+
+test('an index with an unpaired surrogate is refused by the reader, like the launcher refuses it', () => {
+  const lone = String.fromCharCode(0xd83d);
+  assert.equal(failure(() => idx.readIndex(envelopeOf(idx.buildPayload([entry('ab-cd', { name: `Bad${lone}` })], settings)), keys)), 'Invalid');
+  assert.equal(failure(() => idx.readIndex(envelopeOf(idx.buildPayload([entry('ab-cd', { name: 'Fine \u{1F600}' })], settings)), keys)), null);
+});
+
+test('signing stops before a payload the launcher would refuse can be published', () => {
+  const dir = workspace();
+  try {
+    fs.writeFileSync(path.join(dir, 'servers', 'ab-cd.json'), JSON.stringify(entry('ab-cd', { terms: { en: 'servers.json', 'pt-BR-x': 'servers.json' } })));
+    const run = sign(dir, ['--throwaway']);
+    assert.equal(run.status, 1);
+    assert.ok(!fs.existsSync(path.join(dir, 'site')));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+const publish = fs.readFileSync(path.join(root, '.github', 'workflows', 'publish.yml'), 'utf8');
+
+test('publishing refuses to sign anything but the current head of the default branch', () => {
+  assert.match(publish, /git\/ref\/heads\/\$BRANCH/);
+  assert.match(publish, /"\$HEAD_SHA" != "\$RUN_SHA"/);
+  assert.match(publish, /re-run of an old commit/);
+  assert.match(publish, /if: needs\.gate\.outputs\.enabled == 'true' && github\.ref == format\('refs\/heads\/\{0\}', github\.event\.repository\.default_branch\)/);
+});
+
+test('cloudflare credentials live in an environment, a missing one is loud, and verify covers every configured host', () => {
+  const cloudflare = publish.slice(publish.indexOf('  deploy-cloudflare:'), publish.indexOf('  verify:'));
+  assert.match(cloudflare, /environment: cloudflare/);
+  assert.match(cloudflare, /::warning::Cloudflare Pages is not configured/);
+  assert.match(cloudflare, /GITHUB_STEP_SUMMARY/);
+  const verify = publish.slice(publish.indexOf('  verify:'));
+  assert.match(verify, /--list-required "\$SKIPPED"/);
+  assert.doesNotMatch(verify, /'github-pages'/);
+  assert.match(verify, /REGISTRY_SKIPPED_MIRRORS/);
+});
+
+test('verify-mirrors lists every configured host unless one is explicitly skipped', () => {
+  const list = (...args) => spawnSync(process.execPath, [path.join(root, 'tools', 'verify-mirrors.js'), '--list-required', ...args]).stdout.toString();
+  assert.equal(list(''), 'github-pages,cloudflare-pages');
+  assert.equal(list('cloudflare-pages'), 'github-pages');
+  assert.equal(list(' cloudflare-pages , github-pages'), '');
+});

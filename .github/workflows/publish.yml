@@ -23,7 +23,8 @@ jobs:
   gate:
     runs-on: ubuntu-latest
     timeout-minutes: 2
-    permissions: {}
+    permissions:
+      contents: read
     outputs:
       enabled: ${{ steps.check.outputs.enabled }}
     steps:
@@ -31,17 +32,33 @@ jobs:
         env:
           PUBLISH: ${{ vars.REGISTRY_PUBLISH }}
           ON_DEFAULT_BRANCH: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+          BRANCH: ${{ github.event.repository.default_branch }}
+          RUN_SHA: ${{ github.sha }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          GH_TOKEN: ${{ github.token }}
+          API: ${{ github.api_url }}
+          REPO: ${{ github.repository }}
         run: |
-          if [ "$PUBLISH" = "true" ] && [ "$ON_DEFAULT_BRANCH" = "true" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
+          if [ "$PUBLISH" != "true" ] || [ "$ON_DEFAULT_BRANCH" != "true" ]; then
             echo "enabled=false" >> "$GITHUB_OUTPUT"
             echo "::notice::Publishing is off: set the repository variable REGISTRY_PUBLISH to true when the registry environment and the key are ready (and run from the default branch)."
+            exit 0
           fi
+          HEAD_SHA=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$API/repos/$REPO/git/ref/heads/$BRANCH" | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).object.sha")
+          if [ "$HEAD_SHA" != "$RUN_SHA" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            if [ "$RUN_ATTEMPT" != "1" ]; then
+              echo "::error::This is a re-run of an old commit ($RUN_SHA) but $BRANCH is at $HEAD_SHA. Signing it would give old content a fresh serial. Start a new run instead."
+              exit 1
+            fi
+            echo "::notice::A newer commit ($HEAD_SHA) exists; its own run publishes."
+            exit 0
+          fi
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
 
   sign:
     needs: gate
-    if: needs.gate.outputs.enabled == 'true'
+    if: needs.gate.outputs.enabled == 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: registry
@@ -95,6 +112,7 @@ jobs:
     needs: sign
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    environment: cloudflare
     permissions:
       contents: read
     outputs:
@@ -118,7 +136,8 @@ jobs:
         run: |
           if [ "$CONFIGURED" != "true" ]; then
             echo "deployed=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Cloudflare Pages is not configured (CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID); skipping it."
+            echo "::warning::Cloudflare Pages is not configured (CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in the cloudflare environment), so only the other hosts are updated and the verify job will fail unless REGISTRY_SKIPPED_MIRRORS names cloudflare-pages."
+            echo "Cloudflare Pages was NOT updated: no credentials configured." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           PROJECT=$(node -p "require('./config/mirrors.json').mirrors.find((m) => m.kind === 'cloudflare-pages').project")
@@ -141,5 +160,7 @@ jobs:
         env:
           SERIAL: ${{ needs.sign.outputs.serial }}
           REGISTRY_KEY_ID: ${{ vars.REGISTRY_KEY_ID || 'r1' }}
-          REQUIRED: ${{ needs.deploy-cloudflare.outputs.deployed == 'true' && 'github-pages,cloudflare-pages' || 'github-pages' }}
-        run: node tools/verify-mirrors.js --public-key "keys/$REGISTRY_KEY_ID.pub.pem" --key-id "$REGISTRY_KEY_ID" --serial "$SERIAL" --require "$REQUIRED"
+          SKIPPED: ${{ vars.REGISTRY_SKIPPED_MIRRORS }}
+        run: |
+          REQUIRED=$(node tools/verify-mirrors.js --list-required "$SKIPPED")
+          node tools/verify-mirrors.js --public-key "keys/$REGISTRY_KEY_ID.pub.pem" --key-id "$REGISTRY_KEY_ID" --serial "$SERIAL" --require "$REQUIRED"

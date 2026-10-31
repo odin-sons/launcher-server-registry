@@ -130,9 +130,11 @@ Key handling is in [key-management.md](key-management.md).
       `github-pages` environment.
 - [ ] Cloudflare Pages: create a Direct Upload project with the name in `config/mirrors.json`
       (`odinsons-registry` by default, which gives `https://odinsons-registry.pages.dev/`), production
-      branch `main`. Add the repository secrets `CLOUDFLARE_API_TOKEN` (a token with "Cloudflare Pages: Edit"
+      branch `main`. Create the Environment `cloudflare` (deployment branches: `main`) and add the secrets `CLOUDFLARE_API_TOKEN` (a token with "Cloudflare Pages: Edit"
       for that account only) and `CLOUDFLARE_ACCOUNT_ID`. Without them the Cloudflare job skips itself with a
-      notice and publishing continues to the other hosts. The deploy job runs a pinned `wrangler`
+      warning, the other hosts are still updated, and the `verify` job fails (a configured host that does not
+      serve the new index is a failure). To run without Cloudflare on purpose, set the variable
+      `REGISTRY_SKIPPED_MIRRORS` to `cloudflare-pages` and remove the host from `config/mirrors.json` and the launcher. The deploy job runs a pinned `wrangler`
       (4.148.0 through `npx`); it is the one third-party package in the pipeline and runs in a job that
       never sees the signing key.
 - [ ] Decide the public names: the defaults in `config/mirrors.json` are the GitHub Pages address
@@ -162,3 +164,18 @@ https://odinsons-registry.pages.dev/
 3. Secrets: `VIRUSTOTAL_API_KEY`. Settings: Actions may create pull requests.
 4. Key, environment `registry`, `keys/r1.pub.pem`, the launcher build that pins it.
 5. Pages and Cloudflare, then `REGISTRY_PUBLISH=true`.
+
+### Runbook: checks to do once, and when something looks wrong
+
+- [ ] After creating the Environment `registry`, prove its branch rule works: Actions, Run workflow,
+      choose a branch other than `main`, run `publish`. The `gate` job must say publishing is off (the
+      workflow also refuses on its own), and no `sign` job may start. If a `sign` job starts on another branch,
+      the environment's "Deployment branches" rule is missing: set it to `main` before adding the secret.
+- [ ] The same for `virustotal` and `cloudflare`: deployment branches limited to `main`.
+- Re-running an old `publish` run does not sign old content with a fresh serial: the `gate` job compares the
+  run's commit with the head of `main` and fails a re-run (attempt 2 or later) of anything older. A first run
+  of a commit that is no longer the head is skipped with a notice, because the newer commit has its own run.
+- A `verify` failure means a configured host does not serve the new index yet or serves a wrong one. Check
+  the host first (Pages deployment, Cloudflare project); the index on the other hosts is still good.
+- A leaked or suspect secret: follow [key-management.md](key-management.md), then also rotate the
+  Cloudflare token and the VirusTotal key, which are separate credentials with separate blast radii.

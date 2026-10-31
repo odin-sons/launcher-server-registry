@@ -31,9 +31,16 @@ async function main() {
       serial: { type: 'string' },
       require: { type: 'string', default: '' },
       attempts: { type: 'string', default: '12' },
-      'delay-seconds': { type: 'string', default: '20' }
+      'delay-seconds': { type: 'string', default: '20' },
+      'list-required': { type: 'string' }
     }
   });
+  if (values['list-required'] !== undefined) {
+    const skipped = new Set(values['list-required'].split(',').map((name) => name.trim()).filter(Boolean));
+    const names = JSON.parse(fs.readFileSync(values.mirrors, 'utf8')).mirrors.map((mirror) => mirror.name).filter((name) => !skipped.has(name));
+    process.stdout.write(names.join(','));
+    return 0;
+  }
   const serial = Number(values.serial);
   if (!values['public-key'] || !Number.isSafeInteger(serial)) throw new Error('--public-key and --serial are required');
   const keys = new Map([[values['key-id'], loadPublicKey(fs.readFileSync(values['public-key'], 'utf8'))]]);

@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const limits = require('./limits');
 const { toIndexRecord } = require('./entry');
+const { containsLoneSurrogate } = require('./text');
 
 const SUPPORTED_SCHEMA = 1;
 const MAX_ENVELOPE_BYTES = 1 << 20;
@@ -11,6 +12,8 @@ const ID = /^[a-z0-9][a-z0-9-]{1,31}$/;
 const DIGEST = /^[0-9a-f]{64}$/;
 const TIME = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})Z$/;
 const STATUSES = new Set(['approved', 'needs-approval', 'suspended']);
+const LANGUAGE = /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})?$/;
+const MAX_TERMS_LANGUAGES = 16;
 
 /** The failures of Launcher.Core's RegistryFailure that the reader and the freshness checks can produce. */
 class RegistryError extends Error {
@@ -121,7 +124,25 @@ function parseReaderEntry(element) {
   for (const key of keys) {
     if (!isRelativePath(key) || typeof digests[key] !== 'string' || !DIGEST.test(digests[key])) throw invalid(`Server '${id}' has an invalid digest entry '${key}'.`);
   }
-  return { id, name, status, mirrors: element.mirrors, digests, raw: element };
+  const pinned = (field) => {
+    const value = element[field];
+    if (value === undefined || value === null) return null;
+    if (typeof value !== 'string' || !isRelativePath(value) || !Object.hasOwn(digests, value)) throw invalid(`Server '${id}' has a ${field} that is not a pinned path.`);
+    return value;
+  };
+  const theme = pinned('theme');
+  const about = pinned('about');
+  const terms = {};
+  if (element.terms !== undefined && element.terms !== null) {
+    if (typeof element.terms !== 'object' || Array.isArray(element.terms)) throw invalid(`Server '${id}' terms must be an object.`);
+    for (const [language, file] of Object.entries(element.terms)) {
+      if (!LANGUAGE.test(language) || typeof file !== 'string' || !isRelativePath(file) || !Object.hasOwn(digests, file)) throw invalid(`Server '${id}' has an invalid terms entry '${language}'.`);
+      terms[language] = file;
+    }
+    const count = Object.keys(terms).length;
+    if (count > MAX_TERMS_LANGUAGES || (count > 0 && !Object.hasOwn(terms, 'en'))) throw invalid(`Server '${id}' terms need an 'en' text and at most ${MAX_TERMS_LANGUAGES} languages.`);
+  }
+  return { id, name, status, mirrors: element.mirrors, digests, theme, about, terms, raw: element };
 }
 
 /** Mirrors RegistryIndexReader.ParsePayload, for a payload whose signature was already checked. */
@@ -133,6 +154,7 @@ function parsePayload(bytes) {
     throw new RegistryError('Malformed', 'The registry index payload is not valid JSON.');
   }
   if (root === null || typeof root !== 'object' || Array.isArray(root)) throw invalid('The payload must be a JSON object.');
+  if (containsLoneSurrogate(root)) throw invalid('The payload contains an unpaired UTF-16 surrogate.');
   const schema = requireInteger(root, 'schema');
   if (schema !== SUPPORTED_SCHEMA) throw new RegistryError('UnsupportedSchema', `The registry index uses schema ${schema}; this reader supports ${SUPPORTED_SCHEMA}.`);
   const issuedAt = requireTime(root, 'issuedAt');
