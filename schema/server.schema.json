@@ -61,7 +61,8 @@
       "description": "Optional language code to path of a Markdown file; en is required; every path must be listed in digests.",
       "type": "object",
       "required": ["en"],
-      "propertyNames": { "pattern": "^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$" },
+      "maxProperties": 16,
+      "propertyNames": { "pattern": "^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$" },
       "additionalProperties": { "$ref": "#/$defs/relativePath" }
     }
   },

@@ -19,6 +19,8 @@ test('the entry schema pins the limits of registry-format.md', () => {
   assert.deepEqual([p.digests.minProperties, p.digests.maxProperties], [1, 64]);
   assert.equal(p.digests.additionalProperties.pattern, '^[0-9a-f]{64}$');
   assert.deepEqual(p.terms.required, ['en']);
+  assert.equal(p.terms.maxProperties, 16);
+  assert.equal(p.terms.propertyNames.pattern, '^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$');
 });
 
 test('the entry schema allows unknown fields', () => {

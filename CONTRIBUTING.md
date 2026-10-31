@@ -35,7 +35,7 @@ letter or digit. The file name and the `id` field must match.
 | `website`, `community` | no | `https` links; `community` is your own chat, on any messenger |
 | `theme` | no | path of `theme.json`; it and every image it names must be in `digests` |
 | `about` | no | path of `about.json`; must be in `digests` |
-| `terms` | no | language code to path of a Markdown file, for example `{ "en": "terms/en.md" }`; `en` is required; every path must be in `digests` |
+| `terms` | no | language code (`en`, `de`, `pt-BR`: two or three letters and at most one subtag) to path of a Markdown file, for example `{ "en": "terms/en.md" }`; `en` is required, at most 16 languages; every path must be in `digests` |
 
 Unknown fields are ignored by the launcher and are not published. The machine-readable form is
 [schema/server.schema.json](schema/server.schema.json).
@@ -96,7 +96,8 @@ to change it.
 | Art picture | PNG or JPEG, 1 MiB, 1920 x 1080 pixels |
 | Terms | 20 KiB per language |
 | Manifest | 16 MiB |
-| `servers.json`, `changelog.md`, other pinned files | 1 MiB |
+| `changelog.md` | 64 KiB |
+| `servers.json`, other pinned files | 1 MiB |
 | One file listed in a manifest | 256 MiB |
 | All files listed in manifests | 2 GiB |
 
