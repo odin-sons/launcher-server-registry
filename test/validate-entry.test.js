@@ -3,7 +3,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { validateEntry } = require('../tools/lib/entry');
-const { validateSubmission, isScannable } = require('../tools/lib/validate-entry');
+const { validateSubmission, isScannable, normaliseName, MAX_GAME_LOOKUPS } = require('../tools/lib/validate-entry');
+const { parseManifest, normalisePath } = require('../tools/lib/manifest');
 const { FetchError } = require('../tools/lib/net');
 const { makeSite, fakeFetcher, sha256, manifest, MIRROR_A, MIRROR_B } = require('./helpers/site');
 const { makePng } = require('./helpers/png');
@@ -30,15 +31,13 @@ test('a healthy community passes every check', async () => {
   assert.ok(fetcher.requests.length > 0);
 });
 
-test('files listed in manifests are checked on the first mirror that answers', async () => {
+test('files listed in manifests are checked on every mirror that answers', async () => {
   const site = makeSite();
   const { result } = await run(site, { fetcher: fakeFetcher(site, { down: [MIRROR_A] }) });
   assert.match(messages(result), /Mirror 1 is not reachable/);
   assert.equal(result.mirrors[0].state, 'unreachable');
   assert.equal(result.mirrors[1].state, 'ok');
   assert.equal(result.listed.ok, 4);
-  assert.equal(result.listed.usedMirror[0], undefined);
-  assert.equal(result.listed.usedMirror[1], 4);
 });
 
 test('a pinned file that differs on one mirror is an error naming the mirror', async () => {
@@ -71,10 +70,10 @@ test('size limits depend on what the file is for', async () => {
 test('a listed file whose content or size differs from the manifest is an error', async () => {
   const site = makeSite({ modFiles: { 'BepInEx/plugins/Demo/Demo.dll': Buffer.from('swapped plugin bytes') } });
   const { result } = await run(site);
-  assert.match(messages(result), /BepInEx\/plugins\/Demo\/Demo\.dll: larger than the 17 bytes the manifest says|hash differs/);
+  assert.match(messages(result), /Demo\.dll: mirror 1: larger than the 17 bytes the manifest says; mirror 2: larger than/);
   assert.equal(result.listed.failed, 1);
   const same = makeSite({ modFiles: { 'BepInEx/plugins/Demo/Demo.dll': Buffer.from('tampered bytes!!!') } });
-  assert.match(messages((await run(same)).result), /Demo\.dll: the hash differs from the manifest/);
+  assert.match(messages((await run(same)).result), /Demo\.dll: mirror 1: the hash differs from the manifest/);
 });
 
 test('game manifests are parsed but their files are never requested', async () => {
@@ -192,7 +191,8 @@ test('code-bearing files become scan targets, once per hash', async () => {
   assert.ok(names.includes('Profile/BepInEx/plugins/Demo/Demo.dll'));
   assert.ok(names.includes('Profile/BepInEx/plugins/Extra/Extra.dll'));
   assert.ok(!names.some((name) => name.endsWith('.cfg') || name.endsWith('manifest.json')));
-  assert.ok(!names.some((name) => name.includes('valheim.exe')));
+  assert.deepEqual(result.scanTargets.filter((target) => target.lookupOnly).flatMap((target) => target.paths), ['Profile/valheim.exe']);
+  assert.ok(result.scanTargets.filter((target) => !target.lookupOnly).every((target) => !target.paths[0].includes('valheim')));
   assert.equal(new Set(result.scanTargets.map((target) => target.sha256)).size, result.scanTargets.length);
   assert.ok(isScannable('a/b/Libdoorstop.DYLIB') && isScannable('x.zip') && !isScannable('x.txt'));
 });
@@ -202,4 +202,68 @@ test('hostile failures from the downloader never escape', async () => {
   const fetcher = fakeFetcher(site, { overrides: { [MIRROR_A]: { 'servers.json': new FetchError('BLOCKED_ADDRESS', 'private') } } });
   const { result } = await run(site, { fetcher });
   assert.match(messages(result), /servers\.json on mirror 1: The host resolves|servers\.json on mirror 1: private/);
+});
+
+test('a file that is wrong on one mirror only is found on that mirror', async () => {
+  const site = makeSite();
+  const swapped = { [MIRROR_B]: { 'Profile/BepInEx/plugins/Extra/Extra.dll': Buffer.from('other') } };
+  const { result } = await run(site, { fetcher: fakeFetcher(site, { overrides: swapped }) });
+  assert.equal(result.listed.failed, 1);
+  assert.match(messages(result), /Extra\.dll: mirror 2: /);
+  assert.ok(!/Extra\.dll: mirror 1/.test(messages(result)));
+});
+
+test('only the three known game manifests are exempt from download; any other game_*.info is verified as a mod list', async () => {
+  const hash = sha256('stolen');
+  const odd = Buffer.from(`MANIFEST 3 sha256\n${hash} 6 BepInEx/plugins/Odd/Odd.dll\n`);
+  const site = makeSite({ files: { 'Profile/game_extra.info': odd, 'Profile/BepInEx/plugins/Odd/Odd.dll': Buffer.from('stolen') } });
+  site.entry.digests['Profile/game_extra.info'] = sha256(odd);
+  const { result, fetcher } = await run(site);
+  assert.equal(result.manifests.find((item) => item.path === 'Profile/game_extra.info').kind, 'mods');
+  assert.ok(fetcher.requests.some((url) => url.includes('Odd.dll')));
+  assert.ok(result.scanTargets.some((target) => target.paths[0].endsWith('Odd.dll') && !target.lookupOnly));
+});
+
+test('game executables become hash-only lookups, capped', async () => {
+  const lines = Array.from({ length: MAX_GAME_LOOKUPS + 20 }, (_, i) => `${sha256(`g${i}`)} 1 valheim_Data/Managed/g${i}.dll`).join('\n');
+  const site = makeSite({ files: { 'Profile/game.info': Buffer.from(`MANIFEST 3 sha256\n# game: 892972_1\n${lines}\n`) } });
+  const { result } = await run(site);
+  assert.equal(result.scanTargets.filter((target) => target.lookupOnly).length, MAX_GAME_LOOKUPS);
+});
+
+test('Windows path folding cannot hide a file: trailing dots, streams and case', () => {
+  for (const name of ['Evil.DLL.', 'evil.dll::$DATA', 'evil.dll ', 'a/CON.dll', 'a:b.dll']) {
+    const text = `MANIFEST 3 sha256\n${sha256('x')} 1 ${name}\n`;
+    assert.notEqual(parseManifest(text).problems.length, 0, name);
+  }
+  assert.ok(isScannable('Evil.DLL.') && isScannable('evil.dll::$DATA') && isScannable('evil.dll  '));
+  const dup = parseManifest(`MANIFEST 3 sha256\n${sha256('x')} 1 A.dll\n${sha256('y')} 1 a.DLL\n`);
+  assert.match(dup.problems[0].message, /collide/);
+});
+
+test('slash runs are trimmed in linear time and overlong lines are refused', () => {
+  const started = Date.now();
+  const slashes = '/'.repeat(300000);
+  const manifest = parseManifest(`MANIFEST 3 sha256\n${sha256('x')} 1 ${slashes}a${slashes}\n`);
+  assert.ok(Date.now() - started < 1500);
+  assert.match(manifest.problems[0].message, /longer than 4096/);
+  assert.equal(normalisePath(`${slashes}a/b${slashes}`), 'a/b');
+});
+
+test('names are compared without invisible characters', async () => {
+  assert.equal(normaliseName('Odin\u200bSons'), normaliseName('OdinSons'));
+  assert.equal(normaliseName('A\u202eB'), 'ab');
+  const { result } = await run(makeSite({ entry: { name: 'Launch\u200ber Team' } }));
+  assert.ok(result.warnings.some((warning) => warning.code === 'name-check'));
+});
+
+test('changelog.md has its own 64 KiB limit', async () => {
+  const { result } = await run(makeSite({ files: { 'Profile/changelog.md': Buffer.alloc(64 * 1024 + 1, 0x61) } }));
+  assert.match(messages(result), /Profile\/changelog\.md on mirror 1: exceeds the 65536 byte limit for this file \(changelog\)/);
+});
+
+test('an incomplete run is not a pass', async () => {
+  const site = makeSite();
+  const result = await validateSubmission({ file: 'servers/test-community.json', entry: site.entry, staticChecks: validateEntry(site.entry, 'test-community.json'), fetcher: fakeFetcher(site), deadline: Date.now() - 1 });
+  assert.notEqual(result.verdict, 'pass');
 });

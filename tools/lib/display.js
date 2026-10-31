@@ -11,7 +11,7 @@ const SCHEMES = ['dark', 'light'];
 const DIRECTIONS = new Set(['horizontal', 'vertical', 'diagonal']);
 const POSITIONS = new Set(['left', 'center', 'right']);
 const COLOR = /^#[0-9A-Fa-f]{6}$/;
-const LANGUAGE = /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/;
+const LANGUAGE = /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$/;
 
 function decodeUtf8(bytes) {
   return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);

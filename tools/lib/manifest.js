@@ -7,14 +7,38 @@ const CURRENT_VERSION = 3;
 const ALGORITHM = 'sha256';
 const MAX_REPORTED_PROBLEMS = 20;
 
+const MAX_LINE_CHARS = 4096;
+const DEVICE_NAMES = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+
+function trimSlashes(text) {
+  let start = 0;
+  let end = text.length;
+  while (start < end && text[start] === '/') start += 1;
+  while (end > start && text[end - 1] === '/') end -= 1;
+  return text.slice(start, end);
+}
+
 function normalisePath(raw) {
-  return raw.replace(/^\/+|\/+$/g, '').replaceAll('\\', '/');
+  return trimSlashes(raw).replaceAll('\\', '/');
+}
+
+/** What Windows makes of a name: no trailing dots or spaces, no alternate data stream, no case. */
+function foldPath(normalised) {
+  return normalised
+    .split('/')
+    .map((part) => part.replace(/:.*$/, '').replace(/[. ]+$/, ''))
+    .join('/')
+    .toLowerCase();
 }
 
 function pathProblem(normalised) {
   if (/[\u0000-\u001f\u007f]/.test(normalised)) return 'contains control characters';
   if (/^[A-Za-z]:/.test(normalised)) return 'starts with a drive letter';
-  if (normalised.split('/').some((part) => part === '' || part === '.' || part === '..')) return 'is not a plain relative path';
+  const parts = normalised.split('/');
+  if (parts.some((part) => part === '' || part === '.' || part === '..')) return 'is not a plain relative path';
+  if (/[<>:"|?*]/.test(normalised)) return 'contains a character Windows does not allow in file names';
+  if (parts.some((part) => /[. ]$/.test(part))) return 'has a name that ends in a dot or a space';
+  if (parts.some((part) => DEVICE_NAMES.test(part.split('.')[0]))) return 'uses a reserved Windows device name';
   return null;
 }
 
@@ -66,6 +90,10 @@ function parseManifest(text) {
     }
     directivesOpen = false;
 
+    if (line.length > MAX_LINE_CHARS) {
+      problem(number, `The line is longer than ${MAX_LINE_CHARS} characters.`);
+      continue;
+    }
     const firstGap = line.indexOf(' ');
     const secondGap = firstGap > 0 ? line.indexOf(' ', firstGap + 1) : -1;
     if (firstGap <= 0 || secondGap <= firstGap + 1) {
@@ -89,8 +117,8 @@ function parseManifest(text) {
     if (!Number.isSafeInteger(size) || size < 0) problem(number, `The size of ${JSON.stringify(normalised.slice(0, 80))} is not a non-negative integer.`);
     const bad = pathProblem(normalised);
     if (bad) problem(number, `The path ${JSON.stringify(normalised.slice(0, 80))} ${bad}.`);
-    const folded = normalised.toLowerCase();
-    if (seen.has(folded)) problem(number, `The path ${JSON.stringify(normalised.slice(0, 80))} repeats line ${seen.get(folded)} (paths that differ only in case collide on Windows and macOS).`);
+    const folded = foldPath(normalised);
+    if (seen.has(folded)) problem(number, `The path ${JSON.stringify(normalised.slice(0, 80))} repeats line ${seen.get(folded)} (paths that differ only in case, trailing dots or spaces collide on Windows and macOS).`);
     else seen.set(folded, number);
 
     entries.push({ path: normalised, hash: hash.toLowerCase(), size, line: number });
@@ -107,7 +135,7 @@ function parseManifest(text) {
 function manifestKind(digestPath) {
   const name = digestPath.split('/').pop();
   if (!name.endsWith('.info')) return null;
-  return /^game(_[a-z0-9]+)?\.info$/.test(name) ? 'game' : 'mods';
+  return /^game(_macos|_linux)?\.info$/.test(name) ? 'game' : 'mods';
 }
 
-module.exports = { parseManifest, manifestKind, normalisePath };
+module.exports = { parseManifest, manifestKind, normalisePath, foldPath, MAX_LINE_CHARS };

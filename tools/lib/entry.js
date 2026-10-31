@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { validate } = require('./json-schema');
 const limits = require('./limits');
+const { containsLoneSurrogate } = require('./text');
 
 const schema = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'schema', 'server.schema.json'), 'utf8'));
 
@@ -44,6 +45,7 @@ function validateEntry(entry, fileName) {
   }
 
   errors.push(...describe(validate(schema, entry)));
+  if (containsLoneSurrogate(entry)) error('schema', 'The entry contains an unpaired UTF-16 surrogate (half of an emoji, for example); the launcher cannot read it.');
 
   if (typeof entry.id === 'string' && fileName !== undefined && `${entry.id}.json` !== fileName) {
     error('file-name', `The file name must be ${entry.id}.json, but it is ${fileName}.`, '/id');

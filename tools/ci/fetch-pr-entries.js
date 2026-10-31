@@ -19,7 +19,15 @@ async function main() {
   const out = process.argv[2];
   if (!repository || !/^\d+$/.test(number || '') || !out) throw new Error('Usage: GITHUB_REPOSITORY=... PR_NUMBER=... GITHUB_TOKEN=... fetch-pr-entries.js <out-dir>');
 
+  const headSha = process.env.PR_HEAD_SHA;
+  if (!/^[0-9a-f]{40}$/.test(headSha || '')) throw new Error('PR_HEAD_SHA must be the commit the event was triggered for.');
+
   const github = client({ token: process.env.GITHUB_TOKEN, repository });
+  const assertHead = async () => {
+    const pull = await github.request('GET', `/repos/${repository}/pulls/${number}`);
+    if (pull.head.sha !== headSha) throw new Error(`The pull request moved from ${headSha} to ${pull.head.sha} while it was being read; a newer run checks the new commit.`);
+  };
+  await assertHead();
   const files = await github.paginate(`/repos/${repository}/pulls/${number}/files`, { pages: MAX_FILES / 100 });
   const problems = [];
   const removed = [];
@@ -27,7 +35,8 @@ async function main() {
   let entryCount = 0;
 
   fs.mkdirSync(path.join(out, 'servers'), { recursive: true });
-  if (files.length >= MAX_FILES) problems.push({ level: 'error', message: `The pull request changes ${MAX_FILES} files or more; split it.` });
+  const truncated = files.length >= MAX_FILES;
+  if (truncated) problems.push({ level: 'error', message: `The pull request changes ${MAX_FILES} files or more; split it.` });
 
   for (const file of files) {
     const names = [file.filename];
@@ -63,6 +72,8 @@ async function main() {
     }
   }
 
+  await assertHead();
+
   if (outside.length) {
     const level = TRUSTED.has(process.env.PR_AUTHOR_ASSOCIATION || '') ? 'warning' : 'error';
     const shown = outside.slice(0, 5).join(', ');
@@ -70,7 +81,7 @@ async function main() {
   }
 
   if (process.env.GITHUB_OUTPUT) {
-    const relevant = files.some((file) => file.filename.startsWith('servers/') || (file.previous_filename || '').startsWith('servers/'));
+    const relevant = truncated || files.some((file) => file.filename.startsWith('servers/') || (file.previous_filename || '').startsWith('servers/'));
     fs.appendFileSync(process.env.GITHUB_OUTPUT, `relevant=${relevant}\n`);
   }
 

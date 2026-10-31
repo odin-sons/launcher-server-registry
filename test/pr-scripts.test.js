@@ -19,7 +19,7 @@ async function fakeGitHub(routes) {
     req.on('end', () => {
       const body = Buffer.concat(chunks).toString();
       calls.push({ method: req.method, url: req.url, body, auth: req.headers.authorization });
-      const handler = routes(req.method, req.url.split('?')[0], req.url);
+      const handler = routes(req.method, req.url.split("?")[0], req.url);
       if (!handler) {
         res.statusCode = 404;
         return res.end('{}');
@@ -46,6 +46,7 @@ function runScript(script, args, env) {
 test('the pull request step reads entries as data and flags everything else', async () => {
   const entry = JSON.stringify({ id: 'a-community' });
   const github = await fakeGitHub((method, route) => {
+    if (route === '/repos/o/r/pulls/7') return { json: { head: { sha: HEAD } } };
     if (route === '/repos/o/r/pulls/7/files') {
       return {
         json: [
@@ -66,13 +67,13 @@ test('the pull request step reads entries as data and flags everything else', as
   const output = path.join(dir, 'github-output');
   try {
     const { code, out } = await runScript('tools/ci/fetch-pr-entries.js', [path.join(dir, 'pr')], {
-      GITHUB_API_URL: github.url, GITHUB_REPOSITORY: 'o/r', PR_NUMBER: '7', GITHUB_TOKEN: 'token-1', PR_HEAD_SHA: 'headsha', PR_AUTHOR_ASSOCIATION: 'NONE', GITHUB_OUTPUT: output
+      GITHUB_API_URL: github.url, GITHUB_REPOSITORY: 'o/r', PR_NUMBER: '7', GITHUB_TOKEN: 'token-1', PR_HEAD_SHA: HEAD, PR_AUTHOR_ASSOCIATION: 'NONE', GITHUB_OUTPUT: output
     });
     assert.equal(code, 0, out);
     assert.deepEqual(fs.readdirSync(path.join(dir, 'pr', 'servers')).sort(), ['a-community.json', 'new-name.json']);
     assert.equal(fs.readFileSync(path.join(dir, 'pr', 'servers', 'a-community.json'), 'utf8'), entry);
     const meta = JSON.parse(fs.readFileSync(path.join(dir, 'pr', 'meta.json'), 'utf8'));
-    assert.equal(meta.commit, 'headsha');
+    assert.equal(meta.commit, HEAD);
     assert.deepEqual(meta.removed.sort(), ['gone.json', 'old-name.json']);
     const messages = meta.problems.map((problem) => `${problem.level}: ${problem.message}`).join('\n');
     assert.match(messages, /error: servers\/huge\.json is larger than 64 KiB/);
@@ -87,10 +88,10 @@ test('the pull request step reads entries as data and flags everything else', as
 });
 
 test('maintainers only get a warning for files outside servers/, and other pull requests are not relevant', async () => {
-  const github = await fakeGitHub((method, route) => (route === '/repos/o/r/pulls/8/files' ? { json: [{ filename: 'tools/validate.js', status: 'modified', sha: 'x' }] } : null));
+  const github = await fakeGitHub((method, route) => (route === '/repos/o/r/pulls/8/files' ? { json: [{ filename: 'tools/validate.js', status: 'modified', sha: 'x' }] } : route === '/repos/o/r/pulls/8' ? { json: { head: { sha: HEAD } } } : null));
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'registry-pr-'));
   try {
-    const env = { GITHUB_API_URL: github.url, GITHUB_REPOSITORY: 'o/r', PR_NUMBER: '8', GITHUB_TOKEN: 't', PR_AUTHOR_ASSOCIATION: 'OWNER', GITHUB_OUTPUT: path.join(dir, 'out') };
+    const env = { GITHUB_API_URL: github.url, GITHUB_REPOSITORY: 'o/r', PR_NUMBER: '8', GITHUB_TOKEN: 't', PR_HEAD_SHA: HEAD, PR_AUTHOR_ASSOCIATION: 'OWNER', GITHUB_OUTPUT: path.join(dir, 'out') };
     const { code } = await runScript('tools/ci/fetch-pr-entries.js', [path.join(dir, 'pr')], env);
     assert.equal(code, 0);
     assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'pr', 'meta.json'), 'utf8')).problems[0].level, 'warning');
@@ -157,6 +158,76 @@ test('the validate command succeeds when there is nothing to check', async () =>
     fs.writeFileSync(path.join(dir, 'servers', '.gitkeep'), '');
     const result = await runScript('tools/validate.js', ['--servers', path.join(dir, 'servers'), '--entries-dir', path.join(dir, 'servers')], {});
     assert.equal(result.code, 0, result.out);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+const HEAD = 'a'.repeat(40);
+
+test('the pull request step refuses to read a pull request that moved since the event', async () => {
+  const github = await fakeGitHub((method, route) => {
+    if (route === '/repos/o/r/pulls/9') return { json: { head: { sha: 'b'.repeat(40) } } };
+    if (route === '/repos/o/r/pulls/9/files') return { json: [] };
+    return null;
+  });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'registry-pr-'));
+  try {
+    const result = await runScript('tools/ci/fetch-pr-entries.js', [path.join(dir, 'pr')], { GITHUB_API_URL: github.url, GITHUB_REPOSITORY: 'o/r', PR_NUMBER: '9', GITHUB_TOKEN: 't', PR_HEAD_SHA: HEAD });
+    assert.equal(result.code, 2);
+    assert.match(result.out, /moved from a{40} to b{40}/);
+    const missing = await runScript('tools/ci/fetch-pr-entries.js', [path.join(dir, 'pr')], { GITHUB_API_URL: github.url, GITHUB_REPOSITORY: 'o/r', PR_NUMBER: '9', GITHUB_TOKEN: 't' });
+    assert.equal(missing.code, 2);
+    assert.match(missing.out, /PR_HEAD_SHA/);
+  } finally {
+    await github.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a pull request with 300 files cannot hide its entries: it is relevant and an error', async () => {
+  const filler = Array.from({ length: 300 }, (_, i) => ({ filename: `docs/f${i}.md`, status: 'added', sha: `s${i}` }));
+  const github = await fakeGitHub((method, route, url) => {
+    if (route === '/repos/o/r/pulls/10') return { json: { head: { sha: HEAD } } };
+    if (route === '/repos/o/r/pulls/10/files') {
+      const page = Number(/[?&]page=(\d+)/.exec(url)[1]);
+      return { json: filler.slice((page - 1) * 100, page * 100) };
+    }
+    return null;
+  });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'registry-pr-'));
+  try {
+    const output = path.join(dir, 'out');
+    const result = await runScript('tools/ci/fetch-pr-entries.js', [path.join(dir, 'pr')], { GITHUB_API_URL: github.url, GITHUB_REPOSITORY: 'o/r', PR_NUMBER: '10', GITHUB_TOKEN: 't', PR_HEAD_SHA: HEAD, PR_AUTHOR_ASSOCIATION: 'NONE', GITHUB_OUTPUT: output });
+    assert.equal(result.code, 0, result.out);
+    assert.equal(fs.readFileSync(output, 'utf8'), 'relevant=true\n');
+    const meta = JSON.parse(fs.readFileSync(path.join(dir, 'pr', 'meta.json'), 'utf8'));
+    assert.ok(meta.problems.some((problem) => problem.level === 'error' && /300 files or more/.test(problem.message)));
+  } finally {
+    await github.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the validate command fails an incomplete run and an index that would not fit', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'registry-cli-'));
+  try {
+    fs.mkdirSync(path.join(dir, 'servers'));
+    const digests = Object.fromEntries(Array.from({ length: 64 }, (_, n) => [`dir/file-number-${n}.json`, 'ab'.repeat(32)]));
+    for (let i = 0; i < 120; i++) {
+      const id = `h${String(i).padStart(4, '0')}`;
+      fs.writeFileSync(path.join(dir, 'servers', `${id}.json`), JSON.stringify({ id, name: `Heavy ${i}`, status: 'approved', mirrors: ['http://insecure.test/'], digests }));
+    }
+    fs.mkdirSync(path.join(dir, 'pr'));
+    const valid = { id: 'new-one', name: 'New One', status: 'approved', mirrors: ['https://files.example.test/'], digests };
+    fs.writeFileSync(path.join(dir, 'pr', 'new-one.json'), JSON.stringify(valid));
+    for (let i = 0; i < 120; i++) {
+      const id = `h${String(i).padStart(4, '0')}`;
+      fs.writeFileSync(path.join(dir, 'servers', `${id}.json`), JSON.stringify({ ...valid, id, name: `Heavy ${i}` }));
+    }
+    const result = await runScript('tools/validate.js', ['--servers', path.join(dir, 'servers'), '--base', path.join(dir, 'servers'), '--entries-dir', path.join(dir, 'pr'), '--deadline-minutes', '0'], {});
+    assert.equal(result.code, 1, result.out);
+    assert.match(result.out, /incomplete|fail/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

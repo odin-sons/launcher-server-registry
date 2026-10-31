@@ -85,7 +85,7 @@ to change it.
 - Each file's SHA-256 equals the pinned digest. A file is rejected as soon as it grows past its limit
   while downloading.
 - Every manifest parses, and the files it lists download from your mirror and match the hashes and
-  sizes in the manifest. Game manifests (`game*.info`) are parsed but their files are not downloaded.
+  sizes in the manifest. The three game manifests (`game.info`, `game_macos.info`, `game_linux.info`) are parsed and their vanilla game files are not downloaded; their executables are only looked up on VirusTotal by hash. Any other `.info` file is treated as a mod list and fully verified. Files are checked on every mirror. File names that Windows would fold (a trailing dot or space, a stream suffix, case) are refused.
 - The theme, About and terms files named by the entry are in `digests`, parse, and respect the limits
   below.
 - Files that carry code are looked up on VirusTotal by hash, and unknown ones are uploaded. Detections

@@ -3,7 +3,8 @@
 const path = require('node:path');
 const limits = require('./limits');
 const { FetchError, mapLimit } = require('./net');
-const { parseManifest, manifestKind } = require('./manifest');
+const { parseManifest, manifestKind, foldPath } = require('./manifest');
+const { withoutInvisible } = require('./text');
 const { checkTheme, checkAbout, checkTerms, checkImage, parseJsonFile } = require('./display');
 
 const SCANNABLE = new Set([
@@ -13,10 +14,11 @@ const SCANNABLE = new Set([
 const IMPERSONATION = /official|odinsons|odin sons|launcher|registry|verified/i;
 const UNREACHABLE = new Set(['NETWORK', 'TIMEOUT', 'BLOCKED_ADDRESS', 'BAD_URL', 'TOO_MANY_REDIRECTS']);
 
-const isScannable = (file) => SCANNABLE.has(path.posix.extname(file).toLowerCase());
+const isScannable = (file) => SCANNABLE.has(path.posix.extname(foldPath(file)));
 const encodePath = (file) => file.split('/').map(encodeURIComponent).join('/');
 const dirOf = (file) => (file.includes('/') ? file.slice(0, file.lastIndexOf('/')) : '');
-const normaliseName = (name) => name.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
+const normaliseName = (name) => withoutInvisible(name).normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
+const MAX_GAME_LOOKUPS = 150;
 const short = (hash) => `${hash.slice(0, 12)}...`;
 
 function describeFailure(error, limit) {
@@ -37,6 +39,7 @@ function roleFor(key, entry, imageRoles) {
   if (image === 'logo') return { role: 'logo', max: limits.MAX_LOGO_BYTES };
   if (image === 'art') return { role: 'art', max: limits.MAX_ART_BYTES };
   if (manifestKind(key)) return { role: 'manifest', max: limits.MAX_MANIFEST_BYTES };
+  if (key.split('/').pop() === 'changelog.md') return { role: 'changelog', max: limits.MAX_CHANGELOG_BYTES };
   return { role: 'listing', max: limits.MAX_LISTING_BYTES };
 }
 
@@ -99,7 +102,7 @@ async function validateSubmission({ file, entry, staticChecks, previous = null, 
   if (typeof entry.name === 'string') {
     const taken = otherNames.get(normaliseName(entry.name));
     if (taken && taken !== entry.id) error('name-taken', `The name is already used by the entry ${taken}.`, '/name');
-    else if (IMPERSONATION.test(entry.name) && entry.id !== 'odinsons') warn('name-check', 'The name contains a word that could be mistaken for the launcher or the registry; a maintainer will check it.', '/name');
+    else if (IMPERSONATION.test(normaliseName(entry.name)) && entry.id !== 'odinsons') warn('name-check', 'The name contains a word that could be mistaken for the launcher or the registry; a maintainer will check it.', '/name');
   }
 
   const blocking = errors.some((item) => ['schema', 'mirror', 'digest-path', 'json'].includes(item.code));
@@ -171,10 +174,11 @@ async function validateSubmission({ file, entry, staticChecks, previous = null, 
   });
 
   checkDisplayFiles({ entry, digests, contents, imageRoles, result, error, warn });
-  const mods = checkManifests({ digests, contents, result, error, warn });
+  const { mods, games } = checkManifests({ digests, contents, result, error, warn });
 
-  await verifyListedFiles({ mods, mirrors, fetcher, deadline, concurrency, result, error, warn, log });
-  collectScanTargets(mods, result);
+  const skipMirrors = new Set(result.mirrors.map((mirror, index) => (mirror.state === 'unreachable' ? index : -1)).filter((index) => index >= 0));
+  await verifyListedFiles({ mods, mirrors, skipMirrors, fetcher, deadline, concurrency, result, error, warn, log });
+  collectScanTargets(mods, games, result);
 
   return finish(result);
 }
@@ -205,6 +209,7 @@ function checkDisplayFiles({ entry, digests, contents, imageRoles, result, error
 
 function checkManifests({ digests, contents, result, error, warn }) {
   const mods = [];
+  const games = [];
   for (const key of Object.keys(digests)) {
     const kind = manifestKind(key);
     if (!kind || !contents.has(key)) continue;
@@ -222,22 +227,22 @@ function checkManifests({ digests, contents, result, error, warn }) {
     }
     const declared = manifest.entries.reduce((total, item) => total + (Number.isSafeInteger(item.size) ? item.size : 0), 0);
     result.manifests.push({ path: key, kind, entries: manifest.entries.length, declaredBytes: declared, problems: manifest.problems.length });
-    if (kind === 'mods' && manifest.problems.length === 0) mods.push({ key, dir: dirOf(key), entries: manifest.entries });
+    if (manifest.problems.length === 0) (kind === 'mods' ? mods : games).push({ key, dir: dirOf(key), entries: manifest.entries });
   }
-  return mods;
+  return { mods, games };
 }
 
-async function verifyListedFiles({ mods, mirrors, fetcher, deadline, concurrency, result, error, warn, log }) {
+async function verifyListedFiles({ mods, mirrors, skipMirrors, fetcher, deadline, concurrency, result, error, warn, log }) {
   const plan = new Map();
   for (const mod of mods) {
     for (const item of mod.entries) {
       const full = mod.dir ? `${mod.dir}/${item.path}` : item.path;
-      const known = plan.get(full.toLowerCase());
+      const known = plan.get(foldPath(full));
       if (known && (known.hash !== item.hash || known.size !== item.size)) {
         error('manifest', `${mod.key}: ${full} is listed with a different hash or size than in ${known.from}.`, `/digests/${mod.key}`);
         continue;
       }
-      if (!known) plan.set(full.toLowerCase(), { path: full, hash: item.hash, size: item.size, from: mod.key });
+      if (!known) plan.set(foldPath(full), { path: full, hash: item.hash, size: item.size, from: mod.key });
     }
   }
   const items = [...plan.values()];
@@ -261,28 +266,28 @@ async function verifyListedFiles({ mods, mirrors, fetcher, deadline, concurrency
       result.listed.skipped += 1;
       return;
     }
-    let verdict = null;
-    for (let index = 0; index < mirrors.length && verdict === null; index++) {
+    const failures = [];
+    for (let index = 0; index < mirrors.length; index++) {
+      if (skipMirrors.has(index)) continue;
       const url = mirrors[index] + encodePath(item.path);
       const timeoutMs = 60000 + Math.ceil(item.size / limits.MiB) * 1000;
       try {
         const downloaded = await fetcher.download(url, { maxBytes: item.size, timeoutMs, deadline, keep: false });
-        if (downloaded.sha256 === item.hash && downloaded.size === item.size) verdict = { ok: true, mirror: index };
-        else verdict = { ok: false, mirror: index, message: downloaded.size !== item.size ? `${item.path}: the size is ${downloaded.size}, the manifest says ${item.size}.` : `${item.path}: the hash differs from the manifest (expected ${short(item.hash)}, got ${short(downloaded.sha256)}).` };
+        if (downloaded.size !== item.size) failures.push(`mirror ${index + 1}: the size is ${downloaded.size}, the manifest says ${item.size}`);
+        else if (downloaded.sha256 !== item.hash) failures.push(`mirror ${index + 1}: the hash differs from the manifest (expected ${short(item.hash)}, got ${short(downloaded.sha256)})`);
       } catch (failure) {
-        if (failure instanceof FetchError && failure.code === 'TOO_LARGE') verdict = { ok: false, mirror: index, message: `${item.path}: larger than the ${item.size} bytes the manifest says.` };
-        else if (index === mirrors.length - 1) verdict = { ok: false, mirror: index, message: `${item.path}: ${describeFailure(failure, item.size).detail}.` };
+        if (failure instanceof FetchError && failure.code === 'TOO_LARGE') failures.push(`mirror ${index + 1}: larger than the ${item.size} bytes the manifest says`);
+        else failures.push(`mirror ${index + 1}: ${describeFailure(failure, item.size).detail}`);
       }
     }
     done += 1;
     if (done % 100 === 0) log(`${done} of ${items.length} listed files checked`);
-    if (verdict.ok) {
+    if (failures.length === 0) {
       result.listed.ok += 1;
       result.listed.bytes += item.size;
-      result.listed.usedMirror[verdict.mirror] = (result.listed.usedMirror[verdict.mirror] || 0) + 1;
     } else {
       result.listed.failed += 1;
-      problems.push({ path: item.path, from: item.from, message: verdict.message });
+      problems.push({ path: item.path, from: item.from, message: `${item.path}: ${failures.join('; ')}.` });
     }
   });
 
@@ -294,21 +299,27 @@ async function verifyListedFiles({ mods, mirrors, fetcher, deadline, concurrency
   }
 }
 
-function collectScanTargets(mods, result) {
+function collectScanTargets(mods, games, result) {
   const byHash = new Map();
-  for (const mod of mods) {
-    for (const item of mod.entries) {
-      if (!isScannable(item.path)) continue;
-      const full = mod.dir ? `${mod.dir}/${item.path}` : item.path;
-      const known = byHash.get(item.hash);
-      if (known) {
-        if (known.paths.length < 3) known.paths.push(full);
-        known.count += 1;
-      } else {
-        byHash.set(item.hash, { sha256: item.hash, size: item.size, paths: [full], count: 1 });
+  let lookups = 0;
+  const add = (set, lookupOnly) => {
+    for (const mod of set) {
+      for (const item of mod.entries) {
+        if (!isScannable(item.path)) continue;
+        const full = mod.dir ? `${mod.dir}/${item.path}` : item.path;
+        const known = byHash.get(item.hash);
+        if (known) {
+          if (known.paths.length < 3) known.paths.push(full);
+          known.count += 1;
+        } else if (!lookupOnly || lookups < MAX_GAME_LOOKUPS) {
+          if (lookupOnly) lookups += 1;
+          byHash.set(item.hash, { sha256: item.hash, size: item.size, paths: [full], count: 1, lookupOnly });
+        }
       }
     }
-  }
+  };
+  add(mods, false);
+  add(games, true);
   result.scanTargets = [...byHash.values()].sort((a, b) => (a.sha256 < b.sha256 ? -1 : 1));
 }
 
@@ -318,4 +329,4 @@ function finish(result) {
   return result;
 }
 
-module.exports = { validateSubmission, isScannable, diffEntries, encodePath, dirOf, normaliseName, SCANNABLE };
+module.exports = { validateSubmission, isScannable, diffEntries, encodePath, dirOf, normaliseName, SCANNABLE, MAX_GAME_LOOKUPS };

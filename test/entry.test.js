@@ -160,3 +160,34 @@ test('the json schema validator refuses keywords it does not implement', () => {
   assert.throws(() => validate({ type: 'string', format: 'uri' }, 'x'), /Unsupported schema keyword 'format'/);
   assert.throws(() => validate({ oneOf: [] }, 'x'), /Unsupported schema keyword 'oneOf'/);
 });
+
+test('unpaired surrogates anywhere in an entry are refused, paired ones are fine', () => {
+  const lone = String.fromCharCode(0xd83d);
+  assert.match(problems({ ...base(), name: `Bad${lone}` }).join(), /unpaired UTF-16 surrogate/);
+  assert.match(problems({ ...base(), website: `https://x.test/${lone}` }).join(), /unpaired UTF-16 surrogate/);
+  assert.match(problems({ ...base(), digests: { [`a${lone}.txt`]: digest } }).join(), /unpaired UTF-16 surrogate/);
+  assert.match(problems({ ...base(), name: String.fromCharCode(0xde00) }).join(), /unpaired UTF-16 surrogate/);
+  assert.deepEqual(problems({ ...base(), name: 'Fine \u{1F600}' }), []);
+});
+
+test('terms follow the launcher: one subtag at most, 16 languages at most, English required', () => {
+  const entry = (terms) => {
+    const files = Object.fromEntries(Object.values(terms).map((file) => [file, digest]));
+    return { ...base(), terms, digests: { 'servers.json': digest, ...files } };
+  };
+  for (const code of ['en', 'de', 'pt-BR', 'zh-Hant', 'fil']) assert.deepEqual(problems(entry({ en: 'e.md', [code]: 'x.md' })), [], code);
+  for (const code of ['pt-BR-x', 'zh-Hant-TW', 'EN', 'e', 'english', 'en_US', 'en-']) assert.notEqual(problems(entry({ en: 'e.md', [code]: 'x.md' })).length, 0, code);
+  const many = Object.fromEntries(Array.from({ length: 17 }, (_, i) => [i === 0 ? 'en' : `a${String.fromCharCode(97 + i)}`, `t${i}.md`]));
+  assert.notEqual(problems(entry(many)).length, 0);
+  assert.deepEqual(problems(entry(Object.fromEntries(Array.from({ length: 16 }, (_, i) => [i === 0 ? 'en' : `a${String.fromCharCode(97 + i)}`, `t${i}.md`])))), []);
+  assert.notEqual(problems(entry({ de: 'd.md' })).length, 0);
+});
+
+test('the index size is bounded when the change is checked, not when it is signed', () => {
+  const { estimateEnvelopeBytes, fitsInEnvelope } = require('../tools/lib/index-size');
+  const heavy = (i) => ({ ...base(), id: `h${String(i).padStart(4, '0')}`, digests: Object.fromEntries(Array.from({ length: 64 }, (_, n) => [`dir/file-number-${n}.json`, digest])) });
+  assert.ok(fitsInEnvelope([base()]));
+  assert.ok(fitsInEnvelope(Array.from({ length: 50 }, (_, i) => heavy(i))));
+  assert.ok(!fitsInEnvelope(Array.from({ length: 500 }, (_, i) => heavy(i))));
+  assert.ok(estimateEnvelopeBytes([base()]) < 2000);
+});
