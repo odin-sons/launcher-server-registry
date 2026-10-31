@@ -1,0 +1,8 @@
+{
+  "threshold": 5,
+  "perMinute": 4,
+  "perDay": 500,
+  "reservedForRescan": 150,
+  "maxUploadBytes": 33554432,
+  "deadlineMinutes": 40
+}
