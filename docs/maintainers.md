@@ -57,3 +57,20 @@ The scan job holds the key in the environment of one step. That step also downlo
 community's mirrors (only the ones VirusTotal does not know, to upload them), through the same hardened
 downloader as validation; the key is only ever sent to `www.virustotal.com`. Files over 32 MiB are not
 uploaded: the comment lists them for a manual look.
+
+### VirusTotal: who may spend the quota, and where the key lives
+
+- [ ] Create the Environment `virustotal` (deployment branches: `main`) and store `VIRUSTOTAL_API_KEY` as
+      a secret of that environment rather than a repository secret, so it is only handed to the scan job
+      (and the scheduled re-scan). The scan job runs on `pull_request_target`, which uses the base branch,
+      so the branch rule is satisfied. Because naming an environment creates it when it does not exist,
+      the first run creates an empty one: add the secret, then re-run.
+- Pull requests from authors who are not the owner, a member or a collaborator are not scanned until a
+  maintainer adds the label `virustotal` (create it first); the comment says so. This keeps strangers from
+  using up the 500 requests a day. The job is capped at 55 minutes and one run per pull request.
+- Executables listed in the three game manifests (`game.info`, `game_macos.info`, `game_linux.info`) are
+  looked up by hash only (at most 150 per entry), never downloaded or uploaded. A hash VirusTotal has never
+  seen is listed as "game file not known to VirusTotal": vanilla Valheim files are known, a swapped one is
+  not. Every other `.info` file is a mod list and is verified and scanned in full.
+- A report without engine results (a file VirusTotal has queued but not yet analysed) is shown as pending
+  and is never cached as clean.

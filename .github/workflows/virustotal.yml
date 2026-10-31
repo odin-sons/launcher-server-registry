@@ -4,7 +4,7 @@ name: virustotal
 # through the API as plain data. The API key exists only in the environment of the one step that scans.
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
 
 permissions: {}
 
@@ -15,7 +15,8 @@ concurrency:
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 55
+    environment: virustotal
     permissions:
       contents: read
       pull-requests: read
@@ -36,6 +37,19 @@ jobs:
           PR_AUTHOR_ASSOCIATION: ${{ github.event.pull_request.author_association }}
         run: node tools/ci/fetch-pr-entries.js .tmp/pr
 
+      - name: Decide whether this pull request may use the quota
+        id: allow
+        if: steps.fetch.outputs.relevant == 'true'
+        env:
+          ASSOCIATION: ${{ github.event.pull_request.author_association }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          if [[ "$ASSOCIATION" =~ ^(OWNER|MEMBER|COLLABORATOR)$ ]] || [[ ",$LABELS," == *",virustotal,"* ]]; then
+            echo "allowed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "allowed=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Restore the lookup cache
         if: steps.fetch.outputs.relevant == 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -44,8 +58,12 @@ jobs:
           key: virustotal-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: virustotal-
 
+      - name: Say that the scan is waiting for a maintainer
+        if: steps.fetch.outputs.relevant == 'true' && steps.allow.outputs.allowed != 'true'
+        run: node tools/virustotal.js --skip-reason 'The free-tier quota is shared, so a maintainer starts the scan for pull requests from outside the project by adding the label virustotal.' --markdown .tmp/virustotal.md
+
       - name: Scan with VirusTotal
-        if: steps.fetch.outputs.relevant == 'true'
+        if: steps.fetch.outputs.relevant == 'true' && steps.allow.outputs.allowed == 'true'
         env:
           VIRUSTOTAL_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
         run: >

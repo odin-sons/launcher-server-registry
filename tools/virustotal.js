@@ -24,10 +24,16 @@ async function main() {
       out: { type: 'string' },
       markdown: { type: 'string' },
       'api-url': { type: 'string' },
+      'skip-reason': { type: 'string' },
       reserve: { type: 'boolean', default: true }
     }
   });
   const write = (file, text) => file && fs.writeFileSync(file, text);
+  if (values['skip-reason']) {
+    write(values.markdown, renderSkipped(values['skip-reason']));
+    process.stdout.write('Scan skipped\n');
+    return 0;
+  }
   const apiKey = process.env.VIRUSTOTAL_API_KEY;
   if (!apiKey) {
     write(values.markdown, renderSkipped('The VIRUSTOTAL_API_KEY secret is not configured for this repository, so nothing was sent to VirusTotal.'));

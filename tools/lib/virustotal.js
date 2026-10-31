@@ -57,7 +57,8 @@ function createClient({ apiKey, baseUrl = API, fetchImpl = fetch }) {
     async analysis(id) {
       const body = await call('GET', `/analyses/${encodeURIComponent(id)}`);
       if (!body || body.data.attributes.status !== 'completed') return null;
-      return summarise(body.data.attributes.stats, Math.floor(Date.now() / 1000));
+      const result = summarise(body.data.attributes.stats, Math.floor(Date.now() / 1000));
+      return result.total === 0 ? null : result;
     }
   };
 }
@@ -103,9 +104,13 @@ async function scan(targets, { client, budget, cache, benign, threshold, deadlin
       out.push({ ...base, status: error instanceof QuotaError ? 'queued' : 'error', note: error.message });
       continue;
     }
-    if (found) {
+    if (found && found.total === 0) {
+      out.push({ ...base, status: 'analysis-pending', note: 'VirusTotal has no engine results for this file yet' });
+    } else if (found) {
       cache.results[target.sha256] = { at: Date.now(), result: found };
       out.push({ ...base, ...found, status: classify(found, threshold) });
+    } else if (target.lookupOnly) {
+      out.push({ ...base, status: 'unknown', note: 'not known to VirusTotal' });
     } else if (target.size > maxUploadBytes) {
       out.push({ ...base, status: 'too-large' });
     } else {
@@ -144,7 +149,7 @@ async function scan(targets, { client, budget, cache, benign, threshold, deadlin
       out.push({ ...entry.base, status: error instanceof QuotaError ? 'analysis-pending' : 'error', note: error.message });
       continue;
     }
-    if (result) {
+    if (result && result.total > 0) {
       cache.results[entry.base.sha256] = { at: Date.now(), result };
       out.push({ ...entry.base, ...result, status: classify(result, threshold), uploaded: true });
     } else if (budget.now() + wait < deadline) {

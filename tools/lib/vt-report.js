@@ -12,6 +12,7 @@ const LABEL = {
   queued: 'queued (quota)',
   'analysis-pending': 'uploaded, analysis pending',
   'too-large': 'unknown, too large to upload',
+  unknown: 'game file not known to VirusTotal',
   error: 'lookup failed'
 };
 
@@ -26,13 +27,13 @@ function renderScan(entries, { threshold, remainingToday, commit }) {
   const flagged = count('flagged');
   const out = [MARKER, `## VirusTotal: ${flagged ? `${flagged} file${flagged === 1 ? '' : 's'} for a maintainer to look at` : 'no file at or above the threshold'}`];
   out.push(`Commit ${code(String(commit || '').slice(0, 12))}. This is a signal for the reviewer, not a verdict: BepInEx and similar loaders are flagged by a few engines because of what they do, and a clean scan proves little about new code. The threshold is ${threshold} detecting engines (malicious plus suspicious).`);
-  out.push(`\n${all.length} distinct files: ${['flagged', 'detections', 'clean', 'benign', 'queued', 'analysis-pending', 'too-large', 'error'].map((status) => `${count(status)} ${LABEL[status]}`).filter((text) => !text.startsWith('0 ')).join(', ') || 'none'}.`);
+  out.push(`\n${all.length} distinct files: ${['flagged', 'detections', 'clean', 'benign', 'unknown', 'queued', 'analysis-pending', 'too-large', 'error'].map((status) => `${count(status)} ${LABEL[status]}`).filter((text) => !text.startsWith('0 ')).join(', ') || 'none'}.`);
   const waiting = count('queued') + count('analysis-pending');
   if (waiting) out.push(`\n${waiting} files are waiting for the free-tier quota (4 requests a minute, 500 a day; ${remainingToday} requests left for pull requests today). Re-run the job later; finished results are cached.`);
   if (count('too-large')) out.push('\nFiles over the upload cap are not sent to VirusTotal when it does not know them; look at them by hand.');
 
   for (const entry of entries) {
-    const interesting = entry.files.filter((file) => ['flagged', 'detections', 'queued', 'analysis-pending', 'too-large', 'error'].includes(file.status));
+    const interesting = entry.files.filter((file) => ['flagged', 'detections', 'unknown', 'queued', 'analysis-pending', 'too-large', 'error'].includes(file.status));
     out.push(`\n### ${code(entry.id)}`);
     for (const problem of entry.problems || []) out.push(`- ${esc(problem)}`);
     if (!interesting.length) {

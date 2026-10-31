@@ -175,7 +175,8 @@ test('scan targets come from the pinned manifests only', async () => {
   const site = makeSite();
   const { targets, problems } = await collectTargets(site.entry, fakeFetcher(site), Date.now() + 60000);
   assert.deepEqual(problems, []);
-  assert.deepEqual(targets.flatMap((t) => t.paths).sort(), ['Profile/BepInEx/plugins/Demo/Demo.dll', 'Profile/BepInEx/plugins/Extra/Extra.dll']);
+  assert.deepEqual(targets.filter((t) => !t.lookupOnly).flatMap((t) => t.paths).sort(), ['Profile/BepInEx/plugins/Demo/Demo.dll', 'Profile/BepInEx/plugins/Extra/Extra.dll']);
+  assert.deepEqual(targets.filter((t) => t.lookupOnly).flatMap((t) => t.paths), ['Profile/valheim.exe']);
   const tampered = { ...site.entry, digests: { ...site.entry.digests, 'Profile/update.info': h('0') } };
   const result = await collectTargets(tampered, fakeFetcher(site), Date.now() + 60000);
   assert.match(result.problems[0], /update\.info could not be downloaded with its pinned digest/);
@@ -220,4 +221,44 @@ test('benign.js adds hashes with the note and no duplicates', () => {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('a report with no engine results is not clean and is never cached', async () => {
+  const { opts } = options();
+  const client = fakeClient({ known: { a: { malicious: 0, suspicious: 0, total: 0, date: null } }, analyses: { 'analysis-b.dll': { malicious: 0, suspicious: 0, total: 0 } } });
+  const results = await scan([target('a'), target('b')], { ...opts, client });
+  assert.deepEqual(results.map((r) => r.status), ['analysis-pending', 'analysis-pending']);
+  assert.deepEqual(opts.cache.results, {});
+  const empty = createClient({ apiKey: 'k', fetchImpl: async () => new Response(JSON.stringify({ data: { attributes: { status: 'completed', stats: {} } } })) });
+  assert.equal(await empty.analysis('x'), null);
+});
+
+test('game files are looked up by hash and never uploaded', async () => {
+  const { opts } = options();
+  const client = fakeClient({ known: { b: { malicious: 0, suspicious: 0, total: 70 } } });
+  const results = await scan([{ ...target('a'), lookupOnly: true }, { ...target('b'), lookupOnly: true }], { ...opts, client });
+  assert.deepEqual(results.map((r) => r.status), ['unknown', 'clean']);
+  assert.deepEqual(client.calls.map((call) => call[0]), ['lookup', 'lookup']);
+  assert.match(renderScan([{ id: 'x-y', files: results }], { threshold: 5, remainingToday: 1, commit: 'c' }), /game file not known to VirusTotal/);
+});
+
+test('the scan can be held back with a stated reason and no key', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'registry-vt-'));
+  try {
+    const run = spawnSync(process.execPath, [path.join(__dirname, '..', 'tools', 'virustotal.js'), '--skip-reason', 'A maintainer starts the scan.', '--markdown', path.join(dir, 'vt.md')], { env: { PATH: process.env.PATH, VIRUSTOTAL_API_KEY: 'would-be-secret' } });
+    assert.equal(run.status, 0, run.stderr.toString());
+    assert.match(fs.readFileSync(path.join(dir, 'vt.md'), 'utf8'), /A maintainer starts the scan/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the scan workflow only spends quota for maintainers or a labelled pull request', () => {
+  const text = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'virustotal.yml'), 'utf8');
+  assert.match(text, /types: \[[^\]]*labeled\]/);
+  assert.match(text, /OWNER\|MEMBER\|COLLABORATOR/);
+  assert.match(text, /steps\.allow\.outputs\.allowed == 'true'/);
+  assert.match(text, /environment: virustotal/);
+  assert.match(text, /timeout-minutes: 55/);
+  assert.ok(text.indexOf('VIRUSTOTAL_API_KEY') > text.indexOf("allowed == 'true'"), 'the key is only set on the gated step');
 });

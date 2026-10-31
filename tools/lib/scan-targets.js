@@ -2,7 +2,7 @@
 
 const limits = require('./limits');
 const { parseManifest, manifestKind } = require('./manifest');
-const { isScannable, encodePath, dirOf } = require('./validate-entry');
+const { isScannable, encodePath, dirOf, MAX_GAME_LOOKUPS } = require('./validate-entry');
 
 /**
  * The code-bearing files an entry's mod manifests list. Only the manifests are downloaded, and only a copy that
@@ -12,8 +12,10 @@ const { isScannable, encodePath, dirOf } = require('./validate-entry');
 async function collectTargets(entry, fetcher, deadline) {
   const targets = new Map();
   const problems = [];
+  let lookups = 0;
   for (const [key, pinned] of Object.entries(entry.digests)) {
-    if (manifestKind(key) !== 'mods') continue;
+    const kind = manifestKind(key);
+    if (!kind) continue;
     let bytes = null;
     for (const mirror of entry.mirrors) {
       try {
@@ -41,8 +43,10 @@ async function collectTargets(entry, fetcher, deadline) {
       const known = targets.get(item.hash);
       if (known) {
         if (known.paths.length < 3) known.paths.push(full);
-      } else {
-        targets.set(item.hash, { sha256: item.hash, size: item.size, paths: [full], mirrors: entry.mirrors });
+        if (kind === 'mods') known.lookupOnly = false;
+      } else if (kind === 'mods' || lookups < MAX_GAME_LOOKUPS) {
+        if (kind === 'game') lookups += 1;
+        targets.set(item.hash, { sha256: item.hash, size: item.size, paths: [full], mirrors: entry.mirrors, lookupOnly: kind === 'game' });
       }
     }
   }
