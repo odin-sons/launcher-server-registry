@@ -74,3 +74,40 @@ uploaded: the comment lists them for a manual look.
   not. Every other `.info` file is a mod list and is verified and scanned in full.
 - A report without engine results (a file VirusTotal has queued but not yet analysed) is shown as pending
   and is never cached as clean.
+
+## Scheduled re-scan
+
+`.github/workflows/rescan.yml` runs daily (04:23 UTC) and on demand. For every `approved` entry it
+downloads each pinned file from every mirror and compares the hash, and (with `VIRUSTOTAL_API_KEY`) looks
+the entry's code files up again, asking VirusTotal for a fresh analysis when its report is older than 7
+days. A pinned file whose hash changed or disappeared, or a file now flagged by at least the threshold
+and not on the benign list, opens a pull request that sets the entry to `needs-approval`. A mirror
+that cannot be reached is only noted: an outage does not demote a community.
+
+- [ ] Settings, Actions, General, Workflow permissions: tick "Allow GitHub Actions to create and approve
+      pull requests". Without it the workflow opens an issue with the same text instead.
+- [ ] Do not make the re-scan pull requests merge themselves: merging one is a maintainer's decision,
+      and the merge is what removes the community from new installs in the next index.
+- [ ] GitHub switches scheduled workflows off after 60 days without repository activity. The re-scan and
+      the re-signing both depend on the schedule, so watch the Actions tab or use a monthly commit.
+- Re-scan commits are made through the API and are signed by GitHub; this is the one place where the
+  registry's own history carries GitHub-signed commits.
+
+### Re-scan pull requests and required checks
+
+Pull requests that a workflow opens with the built-in `GITHUB_TOKEN` do not start other workflows, so the
+required checks `test` and `validate` never report on them and the pull request cannot be merged under
+branch protection as it stands. Pick one:
+
+- [ ] Create a fine-grained personal access token (or a GitHub App token) with `contents: write`,
+      `pull-requests: write` and `issues: write` on this repository, store it as the repository secret
+      `REGISTRY_BOT_TOKEN`, and the re-scan uses it instead (`rescan.yml`, job `open-pull-requests`); the
+      pull requests then trigger the checks like any other. The token can open pull requests only; it
+      cannot merge past branch protection.
+- [ ] Or leave the built-in token and let the owner merge re-scan pull requests with the bypass for
+      administrators after reading them, or push an empty commit to the branch to start the checks.
+
+The re-scan skips an entry that already has an open pull request from `rescan/<id>` or an open issue titled
+"Re-scan: <id> needs approval". A leftover branch with neither is deleted and recreated, and a failed run
+removes its own branch, so one failure never blocks the next night. The scan job uses the Environment
+`virustotal` like the pull request scan.
