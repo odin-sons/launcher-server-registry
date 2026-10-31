@@ -1,0 +1,15 @@
+{
+  "mirrors": [
+    {
+      "name": "github-pages",
+      "kind": "github-pages",
+      "url": "https://odin-sons.github.io/launcher-server-registry/"
+    },
+    {
+      "name": "cloudflare-pages",
+      "kind": "cloudflare-pages",
+      "project": "odinsons-registry",
+      "url": "https://odinsons-registry.pages.dev/"
+    }
+  ]
+}

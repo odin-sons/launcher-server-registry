@@ -35,7 +35,10 @@ servers/<id>.json  --pull request-->  CI checks + maintainer review  --merge--> 
 | `schema/server.schema.json` | JSON Schema for an entry |
 | `tools/` | Validation, hashing and the CI scripts (Node.js, no dependencies) |
 | `test/` | Tests (`node --test`) and the fixture community they run against |
-| `docs/` | Maintainer documentation |
+| `config/` | Index settings, the mirror list, VirusTotal settings |
+| `data/` | The known-benign hash list for VirusTotal |
+| `keys/` | The registry's public key(s); the private key is a CI secret |
+| `docs/` | [Maintainer checklist](docs/maintainers.md) and [key management](docs/key-management.md) |
 | `.github/` | Code owners, pull request template, workflows |
 
 ## For server owners
