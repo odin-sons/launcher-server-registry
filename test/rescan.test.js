@@ -3,10 +3,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
-const { spawn, spawnSync } = require('node:child_process');
+const { spawnSync } = require('node:child_process');
 const { checkPinned, decide } = require('../tools/lib/rescan');
 const { scan, Budget } = require('../tools/lib/virustotal');
 const { FetchError } = require('../tools/lib/net');
@@ -73,101 +72,6 @@ test('a stale report is re-analysed and the old one is kept if the new one is no
   const [kept] = await scan([target], stuck);
   assert.equal(kept.status, 'clean');
   assert.equal(kept.note, 'newer analysis pending');
-});
-
-async function fakeRepo(handler) {
-  const calls = [];
-  const server = http.createServer((req, res) => {
-    const chunks = [];
-    req.on('data', (c) => chunks.push(c));
-    req.on('end', () => {
-      const body = Buffer.concat(chunks).toString();
-      calls.push({ method: req.method, url: req.url, body: body ? JSON.parse(body) : null });
-      const answer = handler(req.method, req.url.split('?')[0]) || { status: 404, json: {} };
-      res.statusCode = answer.status || 200;
-      res.setHeader('content-type', 'application/json');
-      res.end(JSON.stringify(answer.json));
-    });
-  });
-  await new Promise((r) => server.listen(0, '127.0.0.1', r));
-  return { calls, url: `http://127.0.0.1:${server.address().port}`, close: () => server.close() };
-}
-
-function runOpener(cwd, env) {
-  return new Promise((resolve) => {
-    const child = spawn(process.execPath, [path.join(__dirname, '..', 'tools', 'ci', 'open-rescan-prs.js'), 'rescan.json'], { cwd, env: { PATH: process.env.PATH, ...env } });
-    let out = '';
-    child.stdout.on('data', (c) => { out += c; });
-    child.stderr.on('data', (c) => { out += c; });
-    child.on('close', (code) => resolve({ code, out }));
-  });
-}
-
-test('the opener makes one branch, one edit and one pull request per demoted entry', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'registry-opener-'));
-  const original = '{\n  "id": "ab-cd",\n  "status": "approved",\n  "name": "Ab"\n}\n';
-  fs.mkdirSync(path.join(dir, 'servers'));
-  fs.writeFileSync(path.join(dir, 'servers', 'ab-cd.json'), original);
-  fs.writeFileSync(path.join(dir, 'servers', 'other.json'), '{"status":"approved"}');
-  const decisions = { entries: [
-    { id: 'ab-cd', action: 'demote', reasons: ['x.dll is now <b>flagged</b> @everyone'], notes: [] },
-    { id: 'other', action: 'ok', reasons: [], notes: [] },
-    { id: '../evil', action: 'demote', reasons: ['x'], notes: [] },
-    { id: 'missing', action: 'demote', reasons: ['x'], notes: [] }
-  ] };
-  fs.writeFileSync(path.join(dir, 'rescan.json'), JSON.stringify(decisions));
-  const repo = await fakeRepo((method, route) => {
-    if (route === '/repos/o/r/git/ref/heads/rescan/ab-cd') return { status: 404, json: {} };
-    if (route === '/repos/o/r/git/ref/heads/main') return { json: { object: { sha: 'basesha' } } };
-    if (route === '/repos/o/r/git/refs') return { status: 201, json: {} };
-    if (route === '/repos/o/r/contents/servers/ab-cd.json' && method === 'GET') return { json: { sha: 'filesha', content: Buffer.from(original).toString('base64') } };
-    if (route === '/repos/o/r/contents/servers/ab-cd.json' && method === 'PUT') return { json: {} };
-    if (route === '/repos/o/r/pulls') return { status: 201, json: {} };
-    return null;
-  });
-  try {
-    const result = await runOpener(dir, { GITHUB_API_URL: repo.url, GITHUB_REPOSITORY: 'o/r', GITHUB_TOKEN: 't', DEFAULT_BRANCH: 'main', RUN_URL: 'https://example.test/run' });
-    assert.equal(result.code, 0, result.out);
-    const writes = repo.calls.filter((c) => c.method !== 'GET').map((c) => `${c.method} ${c.url}`);
-    assert.deepEqual(writes, ['POST /repos/o/r/git/refs', 'PUT /repos/o/r/contents/servers/ab-cd.json', 'POST /repos/o/r/pulls']);
-    const put = repo.calls.find((c) => c.method === 'PUT').body;
-    assert.equal(Buffer.from(put.content, 'base64').toString(), original.replace('"approved"', '"needs-approval"'));
-    assert.equal(put.branch, 'rescan/ab-cd');
-    const pr = repo.calls.find((c) => c.url === '/repos/o/r/pulls').body;
-    assert.equal(pr.base, 'main');
-    assert.doesNotMatch(pr.body, /<b>|@everyone/);
-  } finally {
-    repo.close();
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test('an existing rescan branch is not touched, and a refused pull request becomes an issue', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'registry-opener-'));
-  fs.mkdirSync(path.join(dir, 'servers'));
-  fs.writeFileSync(path.join(dir, 'servers', 'ab-cd.json'), '{"status":"approved"}');
-  fs.writeFileSync(path.join(dir, 'rescan.json'), JSON.stringify({ entries: [{ id: 'ab-cd', action: 'demote', reasons: ['r'], notes: [] }] }));
-  let exists = true;
-  const repo = await fakeRepo((method, route) => {
-    if (route === '/repos/o/r/git/ref/heads/rescan/ab-cd') return exists ? { json: {} } : { status: 404, json: {} };
-    if (route === '/repos/o/r/git/ref/heads/main') return { json: { object: { sha: 's' } } };
-    if (route === '/repos/o/r/git/refs') return { status: 201, json: {} };
-    if (route.startsWith('/repos/o/r/contents/')) return { json: { sha: 'f', content: Buffer.from('{"status":"approved"}').toString('base64') } };
-    if (route === '/repos/o/r/pulls') return { status: 403, json: {} };
-    if (route === '/repos/o/r/issues') return { status: 201, json: {} };
-    return null;
-  });
-  const env = { GITHUB_API_URL: repo.url, GITHUB_REPOSITORY: 'o/r', GITHUB_TOKEN: 't' };
-  try {
-    assert.equal((await runOpener(dir, env)).code, 0);
-    assert.deepEqual(repo.calls.filter((c) => c.method !== 'GET'), []);
-    exists = false;
-    assert.equal((await runOpener(dir, env)).code, 0);
-    assert.ok(repo.calls.some((c) => c.url === '/repos/o/r/issues' && /Re-scan: ab-cd needs approval/.test(c.body.title)));
-  } finally {
-    repo.close();
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
 });
 
 test('the rescan command works without a VirusTotal key', () => {

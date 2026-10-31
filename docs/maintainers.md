@@ -92,3 +92,22 @@ that cannot be reached is only noted: an outage does not demote a community.
       the re-signing both depend on the schedule, so watch the Actions tab or use a monthly commit.
 - Re-scan commits are made through the API and are signed by GitHub; this is the one place where the
   registry's own history carries GitHub-signed commits.
+
+### Re-scan pull requests and required checks
+
+Pull requests that a workflow opens with the built-in `GITHUB_TOKEN` do not start other workflows, so the
+required checks `test` and `validate` never report on them and the pull request cannot be merged under
+branch protection as it stands. Pick one:
+
+- [ ] Create a fine-grained personal access token (or a GitHub App token) with `contents: write`,
+      `pull-requests: write` and `issues: write` on this repository, store it as the repository secret
+      `REGISTRY_BOT_TOKEN`, and the re-scan uses it instead (`rescan.yml`, job `open-pull-requests`); the
+      pull requests then trigger the checks like any other. The token can open pull requests only; it
+      cannot merge past branch protection.
+- [ ] Or leave the built-in token and let the owner merge re-scan pull requests with the bypass for
+      administrators after reading them, or push an empty commit to the branch to start the checks.
+
+The re-scan skips an entry that already has an open pull request from `rescan/<id>` or an open issue titled
+"Re-scan: <id> needs approval". A leftover branch with neither is deleted and recreated, and a failed run
+removes its own branch, so one failure never blocks the next night. The scan job uses the Environment
+`virustotal` like the pull request scan.
