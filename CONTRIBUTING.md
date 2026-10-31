@@ -47,7 +47,8 @@ images. The mods themselves are pinned by the SHA-256 values inside the manifest
 manifest means changing its digest.
 
 Compute a digest with `sha256sum <file>` (Linux), `shasum -a 256 <file>` (macOS) or
-`Get-FileHash -Algorithm SHA256 <file>` (PowerShell, lowercase the result).
+`Get-FileHash -Algorithm SHA256 <file>` (PowerShell, lowercase the result). With Node.js 20 or newer,
+`node tools/digest.js <site-root> servers.json Profile/update.info` prints the whole `digests` object.
 
 ```json
 {
@@ -70,10 +71,12 @@ to change it.
 
 1. Fork this repository and add `servers/<id>.json`. Touch nothing else: a pull request that changes
    files outside `servers/` is flagged and needs a maintainer's attention.
-2. Open a pull request and fill in the template.
-3. CI downloads your files and posts one comment with the result. It is updated in place whenever you
+2. Run `node tools/validate.js servers/<id>.json` in your fork. It downloads your files and checks them
+   the way CI does, so you see the result before anyone else does.
+3. Open a pull request and fill in the template.
+4. CI downloads your files and posts one comment with the result. It is updated in place whenever you
    push. Fix everything marked as an error.
-4. A maintainer reviews the change (below). Merging adds your community to the next signed index.
+5. A maintainer reviews the change (below). Merging adds your community to the next signed index.
 
 ## What CI checks
 
@@ -82,7 +85,7 @@ to change it.
 - Each file's SHA-256 equals the pinned digest. A file is rejected as soon as it grows past its limit
   while downloading.
 - Every manifest parses, and the files it lists download from your mirror and match the hashes and
-  sizes in the manifest. Game manifests (`game*.info`) are parsed but their files are not downloaded.
+  sizes in the manifest. The three game manifests (`game.info`, `game_macos.info`, `game_linux.info`) are parsed and their vanilla game files are not downloaded; their executables are only looked up on VirusTotal by hash. Any other `.info` file is treated as a mod list and fully verified. Files are checked on every mirror. File names that Windows would fold (a trailing dot or space, a stream suffix, case) are refused.
 - The theme, About and terms files named by the entry are in `digests`, parse, and respect the limits
   below.
 - Files that carry code are looked up on VirusTotal by hash, and unknown ones are uploaded. Detections

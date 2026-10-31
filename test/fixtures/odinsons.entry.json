@@ -1,0 +1,14 @@
+{
+  "id": "odinsons",
+  "name": "Odinsons",
+  "status": "approved",
+  "mirrors": [
+    "https://server-cf.odinsons.club/Launcher/",
+    "https://server.odinsons.club/Launcher/"
+  ],
+  "website": "https://odinsons.club/",
+  "community": "https://discord.gg/eTteBxWcfu",
+  "digests": {
+    "servers.json": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  }
+}
