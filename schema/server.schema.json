@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Registry entry servers/<id>.json",
+  "description": "One community in the registry. Mirrors docs/registry-format.md of the launcher repository. String lengths are counted in UTF-16 code units, as the launcher counts them. Unknown fields are allowed and ignored.",
+  "type": "object",
+  "required": ["id", "name", "status", "mirrors", "digests"],
+  "properties": {
+    "id": {
+      "description": "Also the file name without .json; unique.",
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{1,31}$"
+    },
+    "name": {
+      "description": "1 to 48 characters, no control characters.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 48,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+    },
+    "status": {
+      "description": "Set by maintainers.",
+      "enum": ["approved", "needs-approval", "suspended"]
+    },
+    "mirrors": {
+      "description": "1 to 8 https base URLs ending in /, no credentials, query or fragment; most preferred first.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "type": "string",
+        "pattern": "^https://[^\\s/?#@]+/(?:[^\\s?#]*/)?$"
+      }
+    },
+    "website": {
+      "description": "Optional https link.",
+      "type": ["string", "null"],
+      "pattern": "^https://[^\\s/?#@]+(?:[/?#]\\S*)?$"
+    },
+    "community": {
+      "description": "Optional https link to the community's own chat (any messenger).",
+      "type": ["string", "null"],
+      "pattern": "^https://[^\\s/?#@]+(?:[/?#]\\S*)?$"
+    },
+    "digests": {
+      "description": "Path relative to a mirror base URL (no .., no leading / or backslash) to the lowercase hex SHA-256 of that file.",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 64,
+      "propertyNames": { "$ref": "#/$defs/relativePath" },
+      "additionalProperties": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+    },
+    "theme": {
+      "description": "Optional path of theme.json (docs/themes.md); it and every image it names must be listed in digests.",
+      "$ref": "#/$defs/relativePath"
+    },
+    "about": {
+      "description": "Optional path of about.json (docs/server-page.md); must be listed in digests.",
+      "$ref": "#/$defs/relativePath"
+    },
+    "terms": {
+      "description": "Optional language code to path of a Markdown file; en is required; every path must be listed in digests.",
+      "type": "object",
+      "required": ["en"],
+      "maxProperties": 16,
+      "propertyNames": { "pattern": "^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$" },
+      "additionalProperties": { "$ref": "#/$defs/relativePath" }
+    }
+  },
+  "$defs": {
+    "relativePath": {
+      "type": "string",
+      "pattern": "^(?!.*\\\\)(?:(?!\\.{1,2}/)[^/]+/)*(?!\\.{1,2}$)[^/]+$"
+    }
+  }
+}

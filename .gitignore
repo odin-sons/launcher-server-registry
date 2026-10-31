@@ -1,0 +1,5 @@
+node_modules/
+.tmp/
+*.key
+*.private.pem
+*-private.pem
